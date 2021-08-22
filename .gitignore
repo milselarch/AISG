@@ -1,0 +1,5 @@
+*.zip
+datasets/train/*
+datasets/train/videos
+*.mp4
+.idea
