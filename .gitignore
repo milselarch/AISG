@@ -1,5 +1,7 @@
 *.zip
 datasets/train/*
 datasets/train/videos
+__pycache__
 *.mp4
 .idea
+*.pkl
