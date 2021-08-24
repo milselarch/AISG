@@ -15,20 +15,16 @@ from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.metrics import accuracy_score
 import pickle
 
-"""
-https://github.com/HHTseng/video-classification/blob/master/CRNN/UCF101_CRNN.py
-"""
-
 # set path
 data_path = "./jpegs_256/"    # define UCF-101 RGB data path
 action_name_path = './UCF101actions.pkl'
-save_model_path = "./CRNN_ckpt/"
+save_model_path = "./ResNetCRNN_ckpt/"
 
 # EncoderCNN architecture
 CNN_fc_hidden1, CNN_fc_hidden2 = 1024, 768
-CNN_embed_dim = 512      # latent dim extracted by 2D CNN
-img_x, img_y = 256, 342  # resize video 2d frame size
-dropout_p = 0.0          # dropout probability
+CNN_embed_dim = 512   # latent dim extracted by 2D CNN
+res_size = 224        # ResNet image size
+dropout_p = 0.0       # dropout probability
 
 # DecoderRNN architecture
 RNN_hidden_layers = 3
@@ -38,8 +34,8 @@ RNN_FC_dim = 256
 # training parameters
 k = 101             # number of target category
 epochs = 120        # training epochs
-batch_size = 30
-learning_rate = 1e-4
+batch_size = 40
+learning_rate = 1e-3
 log_interval = 10   # interval for displaying training info
 
 # Select which frame to begin & end in videos
@@ -133,6 +129,7 @@ device = torch.device("cuda" if use_cuda else "cpu")   # use CPU or GPU
 # Data loading parameters
 params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 4, 'pin_memory': True} if use_cuda else {}
 
+
 # load UCF101 actions names
 with open(action_name_path, 'rb') as f:
     action_names = pickle.load(f)
@@ -173,7 +170,7 @@ all_y_list = labels2cat(le, actions)    # all video labels
 # train, test split
 train_list, test_list, train_label, test_label = train_test_split(all_X_list, all_y_list, test_size=0.25, random_state=42)
 
-transform = transforms.Compose([transforms.Resize([img_x, img_y]),
+transform = transforms.Compose([transforms.Resize([res_size, res_size]),
                                 transforms.ToTensor(),
                                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
@@ -185,10 +182,9 @@ train_set, valid_set = Dataset_CRNN(data_path, train_list, train_label, selected
 train_loader = data.DataLoader(train_set, **params)
 valid_loader = data.DataLoader(valid_set, **params)
 
-# Create model
-cnn_encoder = EncoderCNN(img_x=img_x, img_y=img_y, fc_hidden1=CNN_fc_hidden1, fc_hidden2=CNN_fc_hidden2,
-                         drop_p=dropout_p, CNN_embed_dim=CNN_embed_dim).to(device)
 
+# Create model
+cnn_encoder = ResCNNEncoder(fc_hidden1=CNN_fc_hidden1, fc_hidden2=CNN_fc_hidden2, drop_p=dropout_p, CNN_embed_dim=CNN_embed_dim).to(device)
 rnn_decoder = DecoderRNN(CNN_embed_dim=CNN_embed_dim, h_RNN_layers=RNN_hidden_layers, h_RNN=RNN_hidden_nodes,
                          h_FC_dim=RNN_FC_dim, drop_p=dropout_p, num_classes=k).to(device)
 
@@ -198,7 +194,18 @@ if torch.cuda.device_count() > 1:
     cnn_encoder = nn.DataParallel(cnn_encoder)
     rnn_decoder = nn.DataParallel(rnn_decoder)
 
-crnn_params = list(cnn_encoder.parameters()) + list(rnn_decoder.parameters())
+    # Combine all EncoderCNN + DecoderRNN parameters
+    crnn_params = list(cnn_encoder.module.fc1.parameters()) + list(cnn_encoder.module.bn1.parameters()) + \
+                  list(cnn_encoder.module.fc2.parameters()) + list(cnn_encoder.module.bn2.parameters()) + \
+                  list(cnn_encoder.module.fc3.parameters()) + list(rnn_decoder.parameters())
+
+elif torch.cuda.device_count() == 1:
+    print("Using", torch.cuda.device_count(), "GPU!")
+    # Combine all EncoderCNN + DecoderRNN parameters
+    crnn_params = list(cnn_encoder.fc1.parameters()) + list(cnn_encoder.bn1.parameters()) + \
+                  list(cnn_encoder.fc2.parameters()) + list(cnn_encoder.bn2.parameters()) + \
+                  list(cnn_encoder.fc3.parameters()) + list(rnn_decoder.parameters())
+
 optimizer = torch.optim.Adam(crnn_params, lr=learning_rate)
 
 
@@ -239,7 +246,6 @@ plt.title("model loss")
 plt.xlabel('epochs')
 plt.ylabel('loss')
 plt.legend(['train', 'test'], loc="upper left")
-
 # 2nd figure
 plt.subplot(122)
 plt.plot(np.arange(1, epochs + 1), B[:, -1])  # train accuracy (on epoch end)
@@ -248,7 +254,7 @@ plt.title("training scores")
 plt.xlabel('epochs')
 plt.ylabel('accuracy')
 plt.legend(['train', 'test'], loc="upper left")
-title = "./fig_UCF101_CRNN.png"
+title = "./fig_UCF101_ResNetCRNN.png"
 plt.savefig(title, dpi=600)
 # plt.close(fig)
 plt.show()

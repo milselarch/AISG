@@ -1,10 +1,36 @@
 import cv2
 import numpy as np
 
+class VideoArray(object):
+    def __init__(
+        self, out_video, width, height, frames,
+        name, out_pil=None, rescale=1,
+        raw_video=None
+    ):
+        self.name = name
+        self.out_video = out_video
+        self.width = width
+        self.height = height
+        self.frames = frames
+
+        self.out_pil = out_pil
+        self.rescale = rescale
+        self.raw_video = raw_video
+
+    def __repr__(self):
+        class_name = self.__class__.__name__
+        kwargs = ', '.join([
+            f'name={repr(self.name)}',
+            f'width={self.width}',
+            f'height={self.height}'
+        ])
+        return f'{class_name}({kwargs})'
+
+
 def load_video(
     cap, every_n_frames=None, specific_frames=None,
     to_rgb=True, rescale=None, inc_pil=False,
-    max_frames=None
+    max_frames=None, release=True, filename=None
 ):
     """
     Loads a video.
@@ -45,6 +71,7 @@ def load_video(
 
     n_frames_out = len(specific_frames)
     out_pil = []
+
     out_video = np.empty(
         (n_frames_out, height_out, width_out, 3),
         np.dtype('uint8')
@@ -109,12 +136,14 @@ def load_video(
         except Exception as e:
             print(f"Error for file {filename}: {e}")
 
-    cap.release()
+    if release:
+        cap.release()
 
-    if inc_pil:
-        return out_video, out_pil, rescale
-    else:
-        return out_video, rescale
+    return VideoArray(
+        out_video, width=width_out, height=height_out,
+        frames=n_frames_out, out_pil=out_pil, rescale=rescale,
+        raw_video=cap, name=filename
+    )
 
 
 if __name__ == '__main__':
@@ -124,6 +153,6 @@ if __name__ == '__main__':
 
     print(f'OUT TYPE: {type(video)}')
 
-    width = video.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)   # float `width`
-    height = video.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)  # float `height`
+    width = video.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
+    height = video.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
     print(f'RES: {width} {height}')

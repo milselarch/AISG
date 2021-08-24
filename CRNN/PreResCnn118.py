@@ -321,8 +321,13 @@ class EncoderCNN(nn.Module):
 
 # 2D CNN encoder using ResNet-152 pretrained
 class ResCNNEncoder(nn.Module):
-    def __init__(self, fc_hidden1=512, fc_hidden2=512, drop_p=0.3, CNN_embed_dim=300):
-        """Load the pretrained ResNet-152 and replace top fc layer."""
+    def __init__(
+        self, fc_hidden1=512, fc_hidden2=512, drop_p=0.3,
+        CNN_embed_dim=300
+    ):
+        """
+        Load the pretrained ResNet-152 and replace top fc layer.
+        """
         super(ResCNNEncoder, self).__init__()
 
         self.fc_hidden1, self.fc_hidden2 = fc_hidden1, fc_hidden2
@@ -330,6 +335,7 @@ class ResCNNEncoder(nn.Module):
 
         resnet = models.resnet152(pretrained=True)
         modules = list(resnet.children())[:-1]  # delete the last fc layer.
+
         self.resnet = nn.Sequential(*modules)
         self.fc1 = nn.Linear(resnet.fc.in_features, fc_hidden1)
         self.bn1 = nn.BatchNorm1d(fc_hidden1, momentum=0.01)
@@ -355,15 +361,21 @@ class ResCNNEncoder(nn.Module):
 
             cnn_embed_seq.append(x)
 
-        # swap time and sample dim such that (sample dim, time dim, CNN latent dim)
-        cnn_embed_seq = torch.stack(cnn_embed_seq, dim=0).transpose_(0, 1)
-        # cnn_embed_seq: shape=(batch, time_step, input_size)
+        # swap time and sample dim such that
+        # (sample dim, time dim, CNN latent dim)
+        cnn_embed_seq = torch.stack(
+            cnn_embed_seq, dim=0
+        ).transpose_(0, 1)
 
+        # cnn_embed_seq: shape=(batch, time_step, input_size)
         return cnn_embed_seq
 
 
 class DecoderRNN(nn.Module):
-    def __init__(self, CNN_embed_dim=300, h_RNN_layers=3, h_RNN=256, h_FC_dim=128, drop_p=0.3, num_classes=50):
+    def __init__(
+        self, CNN_embed_dim=300, h_RNN_layers=3, h_RNN=256,
+        h_FC_dim=128, drop_p=0.3, num_classes=50
+    ):
         super(DecoderRNN, self).__init__()
 
         self.RNN_input_size = CNN_embed_dim
@@ -373,15 +385,20 @@ class DecoderRNN(nn.Module):
         self.drop_p = drop_p
         self.num_classes = num_classes
 
+        """
+        input & output will has batch size as 1s dimension.
+        e.g. (batch, time_step, input_size)
+        """
         self.LSTM = nn.LSTM(
             input_size=self.RNN_input_size,
             hidden_size=self.h_RNN,
             num_layers=h_RNN_layers,
-            batch_first=True,  # input & output will has batch size as 1s dimension. e.g. (batch, time_step, input_size)
+            batch_first=True,
         )
 
         self.fc1 = nn.Linear(self.h_RNN, self.h_FC_dim)
         self.fc2 = nn.Linear(self.h_FC_dim, self.num_classes)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x_RNN):
         self.LSTM.flatten_parameters()
@@ -395,6 +412,7 @@ class DecoderRNN(nn.Module):
         x = F.dropout(x, p=self.drop_p, training=self.training)
         x = self.fc2(x)
 
-        return x
+        sig_out = self.sigmoid(x)
+        return sig_out
 
 ## ---------------------- end of CRNN module ---------------------- ##
