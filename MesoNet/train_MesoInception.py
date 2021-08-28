@@ -10,6 +10,7 @@ import cv2
 from torchvision import datasets, models, transforms
 from network.classifier import *
 from network.transform import mesonet_data_transforms
+
 def main():
 	args = parse.parse_args()
 	name = args.name
@@ -28,8 +29,14 @@ def main():
 	#creat train and val dataloader
 	train_dataset = torchvision.datasets.ImageFolder(train_path, transform=mesonet_data_transforms['train'])
 	val_dataset = torchvision.datasets.ImageFolder(val_path, transform=mesonet_data_transforms['val'])
-	train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
-	val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
+	train_loader = torch.utils.data.DataLoader(
+		train_dataset, batch_size=batch_size, shuffle=True,
+		drop_last=False, num_workers=2
+	)
+	val_loader = torch.utils.data.DataLoader(
+		val_dataset, batch_size=batch_size, shuffle=True,
+		drop_last=False, num_workers=2
+	)
 	train_dataset_size = len(train_dataset)
 	val_dataset_size = len(val_dataset)
 
@@ -106,14 +113,14 @@ def main():
 	torch.save(model.state_dict(), os.path.join(output_path, "best.pkl"))
 
 
-
-
 if __name__ == '__main__':
 	parse = argparse.ArgumentParser(
-		formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+		formatter_class=argparse.ArgumentDefaultsHelpFormatter
+	)
+
 	parse.add_argument('--name', '-n', type=str, default='Mesonet')
-	parse.add_argument('--train_path', '-tp' , type=str, default = './deepfake_database/train')
-	parse.add_argument('--val_path', '-vp' , type=str, default = './deepfake_database/val')
+	parse.add_argument('--train_path', '-tp' , type=str, default='./deepfake_database/train')
+	parse.add_argument('--val_path', '-vp' , type=str, default='./deepfake_database/validation')
 	parse.add_argument('--batch_size', '-bz', type=int, default=64)
 	parse.add_argument('--epoches', '-e', type=int, default='50')
 	parse.add_argument('--model_name', '-mn', type=str, default='meso4.pkl')

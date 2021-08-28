@@ -7,12 +7,13 @@ from torch.optim import lr_scheduler
 import argparse
 import os
 import cv2
+
 from torchvision import datasets, models, transforms
 from network.classifier import *
 from network.transform import mesonet_data_transforms
 
 
-def main():
+def main(train_workers=4, validation_workers=2):
 	args = parse.parse_args()
 	name = args.name
 	train_path = args.train_path
@@ -23,6 +24,7 @@ def main():
 	model_name = args.model_name
 	model_path = args.model_path
 	output_path = os.path.join('./output', name)
+
 	if not os.path.exists(output_path):
 		os.mkdir(output_path)
 
@@ -37,11 +39,11 @@ def main():
 	)
 	train_loader = torch.utils.data.DataLoader(
 		train_dataset, batch_size=batch_size, shuffle=True,
-		drop_last=False, num_workers=8
+		drop_last=False, num_workers=train_workers
 	)
 	val_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size=batch_size, shuffle=True,
-		drop_last=False, num_workers=8
+		drop_last=False, num_workers=validation_workers
 	)
 	train_dataset_size = len(train_dataset)
 	val_dataset_size = len(val_dataset)
@@ -148,8 +150,14 @@ if __name__ == '__main__':
 	)
 
 	parse.add_argument('--name', '-n', type=str, default='Mesonet')
-	parse.add_argument('--train_path', '-tp' , type=str, default = './deepfake_database/train')
-	parse.add_argument('--val_path', '-vp' , type=str, default = './deepfake_database/validation')
+	parse.add_argument(
+		'--train_path', '-tp' , type=str,
+		default='./deepfake_database/train'
+	)
+	parse.add_argument(
+		'--val_path', '-vp', type=str,
+		default='./deepfake_database/validation'
+	)
 	parse.add_argument('--batch_size', '-bz', type=int, default=64)
 	parse.add_argument('--epoches', '-e', type=int, default='50')
 	parse.add_argument('--model_name', '-mn', type=str, default='meso4.pkl')

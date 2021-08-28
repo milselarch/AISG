@@ -20,52 +20,56 @@ class Video:
         self.container = imageio.get_reader(path, 'ffmpeg')
         self.length = self.container.count_frames()
         self.fps = self.container.get_meta_data()['fps']
-    
+
     def init_head(self):
         self.container.set_image_index(0)
-    
+
     def next_frame(self):
         self.container.get_next_data()
-    
+
     def get(self, key):
         return self.container.get_data(key)
-    
+
     def __call__(self, key):
         return self.get(key)
-    
+
     def __len__(self):
         return self.length
 
 
 class FaceFinder(Video):
-    def __init__(self, path, load_first_face = True):
+    def __init__(self, path, load_first_face=True):
         super().__init__(path)
         self.faces = {}
-        self.coordinates = {}  # stores the face (locations center, rotation, length)
+        # stores the face (locations center, rotation, length)
+        self.coordinates = {}
         self.last_frame = self.get(0)
         self.frame_shape = self.last_frame.shape[:2]
         self.last_location = (0, 200, 200, 0)
-        if (load_first_face):
-            face_positions = face_recognition.face_locations(self.last_frame, number_of_times_to_upsample=2)
+
+        if load_first_face:
+            face_positions = face_recognition.face_locations(
+                self.last_frame, number_of_times_to_upsample=2
+            )
             if len(face_positions) > 0:
                 self.last_location = face_positions[0]
-    
+
     def load_coordinates(self, filename):
         np_coords = np.load(filename)
         self.coordinates = np_coords.item()
-    
+
     def expand_location_zone(self, loc, margin = 0.2):
-        ''' Adds a margin around a frame slice '''
+        """ Adds a margin around a frame slice """
         offset = round(margin * (loc[2] - loc[0]))
         y0 = max(loc[0] - offset, 0)
         x1 = min(loc[1] + offset, self.frame_shape[1])
         y1 = min(loc[2] + offset, self.frame_shape[0])
         x0 = max(loc[3] - offset, 0)
         return (y0, x1, y1, x0)
-    
+
     @staticmethod
     def upsample_location(reduced_location, upsampled_origin, factor):
-        ''' Adapt a location to an upsampled image slice '''
+        """ Adapt a location to an upsampled image slice """
         y0, x1, y1, x0 = reduced_location
         Y0 = round(upsampled_origin[0] + y0 * factor)
         X1 = round(upsampled_origin[1] + x1 * factor)
@@ -84,17 +88,17 @@ class FaceFinder(Video):
                     max_size = size
                     max_location = location
         return max_location
-    
+
     @staticmethod
     def L2(A, B):
         return np.sqrt(np.sum(np.square(A - B)))
-    
+
     def find_coordinates(self, landmark, K = 2.2):
-        '''
+        """
         We either choose K * distance(eyes, mouth),
         or, if the head is tilted, K * distance(eye 1, eye 2)
-        /!\ landmarks coordinates are in (x,y) not (y,x)
-        '''
+        landmarks coordinates are in (x,y) not (y,x)
+        """
         E1 = np.mean(landmark['left_eye'], axis=0)
         E2 = np.mean(landmark['right_eye'], axis=0)
         E = (E1 + E2) / 2
@@ -107,6 +111,7 @@ class FaceFinder(Video):
         l1 = self.L2(E1, E2)
         l2 = self.L2(B, E)
         l = max(l1, l2) * K
+
         if (B[1] == E[1]):
             if (B[0] > E[0]):
                 rot = 90
@@ -114,10 +119,10 @@ class FaceFinder(Video):
                 rot = -90
         else:
             rot = np.arctan((B[0] - E[0]) / (B[1] - E[1])) / np.pi * 180
-        
+
         return ((floor(C[1]), floor(C[0])), floor(l), rot)
-    
-    
+
+
     def find_faces(self, resize = 0.5, stop = 0, skipstep = 0, no_face_acceleration_threshold = 3, cut_left = 0, cut_right = -1, use_frameset = False, frameset = []):
         '''
         The core function to extract faces from frames
@@ -126,7 +131,7 @@ class FaceFinder(Video):
         not_found = 0
         no_face = 0
         no_face_acc = 0
-        
+
         # to only deal with a subset of a video, for instance I-frames only
         if (use_frameset):
             finder_frameset = frameset
@@ -135,23 +140,24 @@ class FaceFinder(Video):
                 finder_frameset = range(0, min(self.length, stop), skipstep + 1)
             else:
                 finder_frameset = range(0, self.length, skipstep + 1)
-        
+
         # Quick face finder loop
         for i in finder_frameset:
             # Get frame
             frame = self.get(i)
+
             if (cut_left != 0 or cut_right != -1):
                 frame[:, :cut_left] = 0
-                frame[:, cut_right:] = 0            
-            
+                frame[:, cut_right:] = 0
+
             # Find face in the previously found zone
             potential_location = self.expand_location_zone(self.last_location)
             potential_face_patch = frame[potential_location[0]:potential_location[2], potential_location[3]:potential_location[1]]
             potential_face_patch_origin = (potential_location[0], potential_location[3])
-    
+
             reduced_potential_face_patch = zoom(potential_face_patch, (resize, resize, 1))
             reduced_face_locations = face_recognition.face_locations(reduced_potential_face_patch, model = 'cnn')
-            
+
             if len(reduced_face_locations) > 0:
                 no_face_acc = 0  # reset the no_face_acceleration mode accumulator
 
@@ -161,7 +167,7 @@ class FaceFinder(Video):
                                                     1 / resize)
                 self.faces[i] = face_location
                 self.last_location = face_location
-                
+
                 # extract face rotation, length and center from landmarks
                 landmarks = face_recognition.face_landmarks(frame, [face_location])
                 if len(landmarks) > 0:
@@ -177,20 +183,20 @@ class FaceFinder(Video):
                     # Avoid spending to much time on a long scene without faces
                     reduced_frame = zoom(frame, (resize, resize, 1))
                     face_locations = face_recognition.face_locations(reduced_frame)
-                    
+
                 if len(face_locations) > 0:
                     print('Face extraction warning : ', i, '- found face in full frame', face_locations)
                     no_face_acc = 0  # reset the no_face_acceleration mode accumulator
-                    
+
                     face_location = self.pop_largest_location(face_locations)
-                    
+
                     # if was found on a reduced frame, upsample location
                     if no_face_acc > no_face_acceleration_threshold:
                         face_location = self.upsample_location(face_location, (0, 0), 1 / resize)
-                    
+
                     self.faces[i] = face_location
                     self.last_location = face_location
-                    
+
                     # extract face rotation, length and center from landmarks
                     landmarks = face_recognition.face_landmarks(frame, [face_location])
                     if len(landmarks) > 0:
@@ -203,7 +209,7 @@ class FaceFinder(Video):
         print('Face extraction report of', 'not_found :', not_found)
         print('Face extraction report of', 'no_face :', no_face)
         return 0
-    
+
     def get_face(self, i):
         ''' Basic unused face extraction without alignment '''
         frame = self.get(i)
@@ -212,7 +218,7 @@ class FaceFinder(Video):
             patch = frame[loc[0]:loc[2], loc[3]:loc[1]]
             return patch
         return frame
-    
+
     @staticmethod
     def get_image_slice(img, y0, y1, x0, x1):
         '''Get values outside the domain of an image'''
@@ -221,7 +227,7 @@ class FaceFinder(Video):
         padded_img = np.pad(img, ((padding, padding), (padding, padding), (0, 0)), 'reflect')
         return padded_img[(padding + y0):(padding + y1),
                         (padding + x0):(padding + x1)]
-    
+
     def get_aligned_face(self, i, l_factor = 1.3):
         '''
         The second core function that converts the data from self.coordinates into an face image.
@@ -249,9 +255,9 @@ class FaceFinder(Video):
 ## Face prediction
 
 class FaceBatchGenerator:
-    '''
-    Made to deal with framesubsets of video.
-    '''
+    """
+    Made to deal with frame subsets of video.
+    """
     def __init__(self, face_finder, target_size = 256):
         self.finder = face_finder
         self.target_size = target_size
@@ -261,7 +267,7 @@ class FaceBatchGenerator:
     def resize_patch(self, patch):
         m, n = patch.shape[:2]
         return zoom(patch, (self.target_size / m, self.target_size / n, 1))
-    
+
     def next_batch(self, batch_size = 50):
         batch = np.zeros((1, self.target_size, self.target_size, 3))
         stop = min(self.head + batch_size, self.length)
@@ -302,19 +308,19 @@ def compute_accuracy(classifier, dirname, frame_subsample_count = 30):
         )]
 
     predictions = {}
-    
+
     for vid in filenames:
         print('Dealing with video ', vid)
-        
+
         # Compute face locations and store them in the face finder
         face_finder = FaceFinder(join(dirname, vid), load_first_face = False)
         skipstep = max(floor(face_finder.length / frame_subsample_count), 0)
         face_finder.find_faces(resize=0.5, skipstep = skipstep)
-        
+
         print('Predicting ', vid)
         gen = FaceBatchGenerator(face_finder)
         p = predict_faces(gen, classifier)
-        
+
         predictions[vid[:-4]] = (np.mean(p > 0.5), p)
 
     return predictions
