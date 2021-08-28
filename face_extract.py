@@ -36,7 +36,7 @@ rescale = 1 / scale_down
 
 json_filename = f'face_map_stats-{scale_down}-{every_n_frames}.json'
 csv_filename = f'face_map_stats-{scale_down}-{every_n_frames}.csv'
-profile_path = f'profile-{scale_down}-{every_n_frames}'
+profile_path = f'profile-{scale_down}-{every_n_frames}.profile'
 
 print(f'rescale is {rescale}')
 print(f'JSON filename is {json_filename}')

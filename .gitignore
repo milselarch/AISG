@@ -2,8 +2,11 @@
 datasets/train/*
 datasets/train/videos
 __pycache__
+.ipynb_checkpoints/*
+
 *.mp4
 .idea
 *.pkl
 *.jpg
 *.pth
+*.profile
