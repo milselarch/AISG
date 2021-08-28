@@ -34,17 +34,18 @@ class Dataset(object):
         print('TEXT SIZE', len(test))
 
     def get_face_locations(
-        self, filename, every_n_frames, rescale,
+        self, vid_obj, every_n_frames, rescale,
         return_vid_obj=True
     ):
-        video_faces = {}
-        vid_obj = self.read_video(
-            filename, every_n_frames=every_n_frames,
-            rescale=rescale
-        )
+        if type(vid_obj) is str:
+            vid_obj = self.read_video(
+                vid_obj, every_n_frames=every_n_frames,
+                rescale=rescale
+            )
 
         np_frames = vid_obj.out_video
         num_frames = len(np_frames)
+        video_faces = {}
 
         for i in range(num_frames):
             image = np_frames[i]

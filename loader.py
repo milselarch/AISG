@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pandas as pd
 
 class VideoArray(object):
     def __init__(
@@ -42,14 +43,81 @@ class VideoArray(object):
 
         return face_images
 
+    def auto_resize(self, *args, **kwargs):
+        resolution = (self.width, self.height)
+        coords = self.cut_blackout(self.out_video, *args, **kwargs)
+        x_start, x_end, y_start, y_end = coords
+        print(f'COORDS {coords}')
+        resized_frames = []
+
+        for frame in self.out_video:
+            cropped_frame = frame[y_start:y_end, x_start:x_end]
+            resized_frame = cv2.resize(cropped_frame, resolution)
+            # print('F-SHAPE', resized_frame.shape)
+            expanded_frame = np.expand_dims(resized_frame, axis=0)
+            resized_frames.append(expanded_frame)
+
+        resized_frames = np.concatenate(resized_frames)
+
+        return VideoArray(
+            resized_frames, width=self.width, height=self.height,
+            frames=self.frames, rescale=self.rescale, name=self.name
+        )
+
+    def cut_blackout(
+        self, images=None, samples=1, intervals=5, roll=4
+    ):
+        if images is None:
+            images = self.out_video
+
+        sample_interval = len(images) // samples
+        x_starts, y_starts = [], []
+        x_ends, y_ends = [], []
+
+        for k in range(samples):
+            interval = sample_interval * k
+            print(f'INTERVAL {interval} {images.shape}')
+            frame = images[interval]
+
+            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            _, binary_frame = cv2.threshold(
+                gray_frame, 1, 255, cv2.THRESH_BINARY
+            )
+
+            x_start, x_end = self.horizontal_clip(
+                binary_frame, intervals=intervals, roll=roll
+            )
+            y_start, y_end = self.vertical_clip(
+                binary_frame, intervals=intervals, roll=roll
+            )
+
+            x_starts.append(x_start)
+            x_ends.append(x_end)
+            y_starts.append(y_start)
+            y_ends.append(y_end)
+
+        x_start = int(np.median(x_starts))
+        x_end = int(np.median(x_ends))
+        y_start = int(np.median(y_starts))
+        y_end = int(np.median(y_ends))
+        return x_start, x_end, y_start, y_end
+
     @classmethod
-    def horizontal_clip(cls, image, intervals=5, roll=5):
+    def h_clip(cls, *args, **kwargs):
+        return cls.horizontal_clip(*args, **kwargs)
+
+    @classmethod
+    def v_clip(cls, *args, **kwargs):
+        return cls.vertical_clip(*args, **kwargs)
+
+    @classmethod
+    def horizontal_clip(cls, bin_image, intervals=5, roll=5):
         first_indexes, last_indexes = [], []
-        interval_length = len(image) // intervals
+        interval_length = len(bin_image) // intervals
 
         for k in range(intervals):
             interval = interval_length * k
-            h_strip = image[interval]
+            h_strip = bin_image[interval]
 
             blackout = cls.get_strip_blackout(h_strip, roll=roll)
             start_index, end_index = blackout
@@ -61,15 +129,15 @@ class VideoArray(object):
         return clip_start, clip_end
 
     @classmethod
-    def vertical_clip(cls, image, intervals=5, roll=5):
+    def vertical_clip(cls, bin_image, intervals=5, roll=5):
         first_indexes, last_indexes = [], []
-        interval_length = len(image) // intervals
+        interval_length = len(bin_image[0]) // intervals
 
         for k in range(intervals):
             interval = interval_length * k
-            h_strip = image[interval, :]
+            v_strip = bin_image[:, interval]
 
-            blackout = cls.get_strip_blackout(h_strip, roll=roll)
+            blackout = cls.get_strip_blackout(v_strip, roll=roll)
             start_index, end_index = blackout
             first_indexes.append(start_index)
             last_indexes.append(end_index)
@@ -86,19 +154,28 @@ class VideoArray(object):
         # print('CLIP STRIP', clip_strip)
 
         indexes = np.where(clip_strip != 0)[0]
-        last_normal_index = max(indexes)
-        # print(indexes, last_normal_index)
-        last_normal_index += roll - 1
+
+        try:
+            last_normal_index = max(indexes)
+            # print(indexes, last_normal_index)
+            last_normal_index += roll - 1
+        except ValueError:
+            last_normal_index = len(img_strip)
 
         if pool_strip[roll] == 0:
             indexes = np.where(clip_strip != 0)[0]
-            first_normal_index = min(indexes)
-            # print(indexes, first_normal_index)
-            first_normal_index += roll // 2 - 1
+
+            try:
+                first_normal_index = min(indexes)
+                # print(indexes, first_normal_index)
+                first_normal_index += roll // 2 - 1
+            except ValueError:
+                first_normal_index = 0
         else:
             first_normal_index = 0
 
         return first_normal_index, last_normal_index
+
 
 def load_video(
     cap, every_n_frames=None, specific_frames=None,
