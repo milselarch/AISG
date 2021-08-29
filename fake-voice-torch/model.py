@@ -23,5 +23,6 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input_values):
+        raise NotImplemented
 
 

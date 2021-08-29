@@ -4,6 +4,8 @@ datasets/train/videos
 __pycache__
 .ipynb_checkpoints/*
 
+*.csv
+*.json
 *.mp4
 .idea
 *.pkl
