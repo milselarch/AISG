@@ -28,6 +28,7 @@ print(f"loading the preprocessed training, validation and test data.")
 train_data = []
 val_data = []
 test_data = []
+
 for i in range(len(base_data_path)):
     train_data.extend(np.load(os.path.join(f'{base_data_path[i]}/preprocessed_data', f'train_preproc_aug.npy'), allow_pickle=True))
     val_data.extend(np.load(os.path.join(f'{base_data_path[i]}/preprocessed_data', f'val_preproc.npy'), allow_pickle=True))
@@ -67,6 +68,7 @@ else:
     model_class = Discriminator_Model(load_pretrained=False, real_test_mode=True)
     print("training model")
     model_class.train(xtrain, ytrain, xval, yval)
+
 print("optimizing threshold probability")
 model_class.optimize_threshold(xtrain, ytrain, xval, yval)
 print(f"optimum threshold is {model_class.opt_threshold}")
@@ -87,6 +89,5 @@ try:
     foundations.log_metric('test_f1_score', np.round(test_f1_score, 2))
     foundations.log_metric('realtalk_accuracy', np.round(real_test_acc_score, 2))
     foundations.log_metric('realtalk_f1_score', np.round(real_test_f1_score_val, 2))
-
 except:
     print("foundations command not found")

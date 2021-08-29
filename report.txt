@@ -1,0 +1,104 @@
+TensorFlow 2.0 Upgrade Script
+-----------------------------
+Converted 8 files
+Detected 10 issues that require attention
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+File: fake-voice-detection/code/constants.py
+--------------------------------------------------------------------------------
+fake-voice-detection/code/constants.py:11:10: ERROR: Using member tf.contrib.training.HParams in deprecated module tf.contrib. tf.contrib.training.HParams cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+--------------------------------------------------------------------------------
+File: fake-voice-detection/code/utils.py
+--------------------------------------------------------------------------------
+fake-voice-detection/code/utils.py:226:12: ERROR: Using member tf.contrib.signal.inverse_stft in deprecated module tf.contrib. tf.contrib.signal.inverse_stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+fake-voice-detection/code/utils.py:228:18: ERROR: Using member tf.contrib.signal.stft in deprecated module tf.contrib. tf.contrib.signal.stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+fake-voice-detection/code/utils.py:230:16: ERROR: Using member tf.contrib.signal.inverse_stft in deprecated module tf.contrib. tf.contrib.signal.inverse_stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+fake-voice-detection/code/utils.py:412:4: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+fake-voice-detection/code/utils.py:581:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+fake-voice-detection/code/utils.py:659:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+fake-voice-detection/code/utils.py:688:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+fake-voice-detection/code/utils.py:769:16: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+fake-voice-detection/code/utils.py:1051:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+================================================================================
+Detailed log follows:
+
+================================================================================
+================================================================================
+Input tree: 'fake-voice-detection/'
+================================================================================
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/inference.py'
+ outputting to 'fake-voice-detection_v2/code/inference.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/constants.py'
+ outputting to 'fake-voice-detection_v2/code/constants.py'
+--------------------------------------------------------------------------------
+
+11:10: ERROR: Using member tf.contrib.training.HParams in deprecated module tf.contrib. tf.contrib.training.HParams cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/utils.py'
+ outputting to 'fake-voice-detection_v2/code/utils.py'
+--------------------------------------------------------------------------------
+
+222:9: INFO: Renamed 'tf.variable_scope' to 'tf.compat.v1.variable_scope'
+226:12: ERROR: Using member tf.contrib.signal.inverse_stft in deprecated module tf.contrib. tf.contrib.signal.inverse_stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+228:18: ERROR: Using member tf.contrib.signal.stft in deprecated module tf.contrib. tf.contrib.signal.stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+230:16: ERROR: Using member tf.contrib.signal.inverse_stft in deprecated module tf.contrib. tf.contrib.signal.inverse_stft cannot be converted automatically. tf.contrib will not be distributed with TensorFlow 2.0, please consider an alternative in non-contrib TensorFlow, a community-maintained repository such as tensorflow/addons, or fork the required code.
+307:11: INFO: Added keywords to args of function 'tf.transpose'
+308:73: INFO: Added keywords to args of function 'tf.transpose'
+328:26: INFO: Added keywords to args of function 'tf.shape'
+412:4: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+581:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+659:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+688:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+769:16: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+1051:8: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/main.py'
+ outputting to 'fake-voice-detection_v2/code/main.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/submit_jobs.py'
+ outputting to 'fake-voice-detection_v2/code/submit_jobs.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/test_foundations.py'
+ outputting to 'fake-voice-detection_v2/code/test_foundations.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/unlabelled_inference.py'
+ outputting to 'fake-voice-detection_v2/code/unlabelled_inference.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'fake-voice-detection/code/test.py'
+ outputting to 'fake-voice-detection_v2/code/test.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+

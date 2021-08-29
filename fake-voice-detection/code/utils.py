@@ -11,7 +11,7 @@ from keras.callbacks import EarlyStopping, ReduceLROnPlateau, TensorBoard
 from keras.models import load_model, Model
 from keras import optimizers
 from keras.layers.advanced_activations import LeakyReLU
-from  keras import backend as K
+from keras import backend as K
 from sklearn.metrics import f1_score, accuracy_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -30,13 +30,12 @@ from keras.utils import multi_gpu_model
 
 from constants import *
 
-#Set a random seed for numpy for reproducibility
+# Set a random seed for numpy for reproducibility
 np.random.seed(42)
 
-if os.environ.get('DISPLAY','') == '':
+if os.environ.get('DISPLAY', '') == '':
     print('no display found. Using non-interactive Agg backend')
     matplotlib.use('Agg')
-
 
 try:
     import foundations
@@ -44,298 +43,343 @@ except Exception as e:
     print(e)
 
 
-
 def load_wav(path, sr):
-	return librosa.core.load(path, sr=sr)[0]
+    return librosa.core.load(path, sr=sr)[0]
+
 
 def save_wav(wav, path, sr):
-	wav *= 32767 / max(0.01, np.max(np.abs(wav)))
-	#proposed by @dsmiller
-	wavfile.write(path, sr, wav.astype(np.int16))
+    wav *= 32767 / max(0.01, np.max(np.abs(wav)))
+    # proposed by @dsmiller
+    wavfile.write(path, sr, wav.astype(np.int16))
+
 
 def save_wavenet_wav(wav, path, sr, inv_preemphasize, k):
-	# wav = inv_preemphasis(wav, k, inv_preemphasize)
-	wav *= 32767 / max(0.01, np.max(np.abs(wav)))
-	wavfile.write(path, sr, wav.astype(np.int16))
+    # wav = inv_preemphasis(wav, k, inv_preemphasize)
+    wav *= 32767 / max(0.01, np.max(np.abs(wav)))
+    wavfile.write(path, sr, wav.astype(np.int16))
+
 
 def preemphasis(wav, k, preemphasize=True):
-	if preemphasize:
-		return signal.lfilter([1, -k], [1], wav)
-	return wav
+    if preemphasize:
+        return signal.lfilter([1, -k], [1], wav)
+    return wav
+
 
 def inv_preemphasis(wav, k, inv_preemphasize=True):
-	if inv_preemphasize:
-		return signal.lfilter([1], [1, -k], wav)
-	return wav
+    if inv_preemphasize:
+        return signal.lfilter([1], [1, -k], wav)
+    return wav
 
-#From https://github.com/r9y9/wavenet_vocoder/blob/master/audio.py
+
+# From https://github.com/r9y9/wavenet_vocoder/blob/master/audio.py
 def start_and_end_indices(quantized, silence_threshold=2):
-	for start in range(quantized.size):
-		if abs(quantized[start] - 127) > silence_threshold:
-			break
-	for end in range(quantized.size - 1, 1, -1):
-		if abs(quantized[end] - 127) > silence_threshold:
-			break
+    for start in range(quantized.size):
+        if abs(quantized[start] - 127) > silence_threshold:
+            break
+    for end in range(quantized.size - 1, 1, -1):
+        if abs(quantized[end] - 127) > silence_threshold:
+            break
 
-	assert abs(quantized[start] - 127) > silence_threshold
-	assert abs(quantized[end] - 127) > silence_threshold
+    assert abs(quantized[start] - 127) > silence_threshold
+    assert abs(quantized[end] - 127) > silence_threshold
 
-	return start, end
+    return start, end
+
 
 def trim_silence(wav, hparams):
-	'''Trim leading and trailing silence
+    '''Trim leading and trailing silence
 	Useful for M-AILABS dataset if we choose to trim the extra 0.5 silence at beginning and end.
 	'''
-	#Thanks @begeekmyfriend and @lautjy for pointing out the params contradiction. These params are separate and tunable per dataset.
-	return librosa.effects.trim(wav, top_db= hparams.trim_top_db, frame_length=hparams.trim_fft_size, hop_length=hparams.trim_hop_size)[0]
+    # Thanks @begeekmyfriend and @lautjy for pointing out the params contradiction. These params are separate and tunable per dataset.
+    return librosa.effects.trim(wav, top_db=hparams.trim_top_db, frame_length=hparams.trim_fft_size,
+                                hop_length=hparams.trim_hop_size)[0]
+
 
 def get_hop_size(hparams):
-	hop_size = hparams.hop_size
-	if hop_size is None:
-		assert hparams.frame_shift_ms is not None
-		hop_size = int(hparams.frame_shift_ms / 1000 * hparams.sample_rate)
-	return hop_size
+    hop_size = hparams.hop_size
+    if hop_size is None:
+        assert hparams.frame_shift_ms is not None
+        hop_size = int(hparams.frame_shift_ms / 1000 * hparams.sample_rate)
+    return hop_size
+
 
 def linearspectrogram(wav, hparams):
-	# D = _stft(preemphasis(wav, hparams.preemphasis, hparams.preemphasize), hparams)
-	D = _stft(wav, hparams)
-	S = _amp_to_db(np.abs(D)**hparams.magnitude_power, hparams) - hparams.ref_level_db
+    # D = _stft(preemphasis(wav, hparams.preemphasis, hparams.preemphasize), hparams)
+    D = _stft(wav, hparams)
+    S = _amp_to_db(np.abs(D) ** hparams.magnitude_power, hparams) - hparams.ref_level_db
 
-	if hparams.signal_normalization:
-		return _normalize(S, hparams)
-	return S
+    if hparams.signal_normalization:
+        return _normalize(S, hparams)
+    return S
+
 
 def melspectrogram(wav, hparams):
-	# D = _stft(preemphasis(wav, hparams.preemphasis, hparams.preemphasize), hparams)
-	D = _stft(wav, hparams)
-	S = _amp_to_db(_linear_to_mel(np.abs(D)**hparams.magnitude_power, hparams), hparams) - hparams.ref_level_db
+    D = _stft(wav, hparams)
+    S = _amp_to_db(_linear_to_mel(
+        np.abs(D) ** hparams.magnitude_power, hparams
+    ), hparams) - hparams.ref_level_db
 
-	if hparams.signal_normalization:
-		return _normalize(S, hparams)
-	return S
+    if hparams.signal_normalization:
+        return _normalize(S, hparams)
+
+    return S
+
 
 def inv_linear_spectrogram(linear_spectrogram, hparams):
-	'''Converts linear spectrogram to waveform using librosa'''
-	if hparams.signal_normalization:
-		D = _denormalize(linear_spectrogram, hparams)
-	else:
-		D = linear_spectrogram
+    '''Converts linear spectrogram to waveform using librosa'''
+    if hparams.signal_normalization:
+        D = _denormalize(linear_spectrogram, hparams)
+    else:
+        D = linear_spectrogram
 
-	S = _db_to_amp(D + hparams.ref_level_db)**(1/hparams.magnitude_power) #Convert back to linear
+    S = _db_to_amp(D + hparams.ref_level_db) ** (1 / hparams.magnitude_power)  # Convert back to linear
 
-	if hparams.use_lws:
-		processor = _lws_processor(hparams)
-		D = processor.run_lws(S.astype(np.float64).T ** hparams.power)
-		y = processor.istft(D).astype(np.float32)
-		return inv_preemphasis(y, hparams.preemphasis, hparams.preemphasize)
-	else:
-		return inv_preemphasis(_griffin_lim(S ** hparams.power, hparams), hparams.preemphasis, hparams.preemphasize)
+    if hparams.use_lws:
+        processor = _lws_processor(hparams)
+        D = processor.run_lws(S.astype(np.float64).T ** hparams.power)
+        y = processor.istft(D).astype(np.float32)
+        return inv_preemphasis(y, hparams.preemphasis, hparams.preemphasize)
+    else:
+        return inv_preemphasis(_griffin_lim(S ** hparams.power, hparams), hparams.preemphasis, hparams.preemphasize)
 
 
 def inv_mel_spectrogram(mel_spectrogram, hparams):
-	'''Converts mel spectrogram to waveform using librosa'''
-	if hparams.signal_normalization:
-		D = _denormalize(mel_spectrogram, hparams)
-	else:
-		D = mel_spectrogram
+    '''Converts mel spectrogram to waveform using librosa'''
+    if hparams.signal_normalization:
+        D = _denormalize(mel_spectrogram, hparams)
+    else:
+        D = mel_spectrogram
 
-	S = _mel_to_linear(_db_to_amp(D + hparams.ref_level_db)**(1/hparams.magnitude_power), hparams)  # Convert back to linear
+    S = _mel_to_linear(_db_to_amp(D + hparams.ref_level_db) ** (1 / hparams.magnitude_power),
+                       hparams)  # Convert back to linear
 
-	if hparams.use_lws:
-		processor = _lws_processor(hparams)
-		D = processor.run_lws(S.astype(np.float64).T ** hparams.power)
-		y = processor.istft(D).astype(np.float32)
-		return inv_preemphasis(y, hparams.preemphasis, hparams.preemphasize)
-	else:
-		return inv_preemphasis(_griffin_lim(S ** hparams.power, hparams), hparams.preemphasis, hparams.preemphasize)
+    if hparams.use_lws:
+        processor = _lws_processor(hparams)
+        D = processor.run_lws(S.astype(np.float64).T ** hparams.power)
+        y = processor.istft(D).astype(np.float32)
+        return inv_preemphasis(y, hparams.preemphasis, hparams.preemphasize)
+    else:
+        return inv_preemphasis(_griffin_lim(S ** hparams.power, hparams), hparams.preemphasis, hparams.preemphasize)
+
 
 ###########################################################################################
 # tensorflow Griffin-Lim
 # Thanks to @begeekmyfriend: https://github.com/begeekmyfriend/Tacotron-2/blob/mandarin-new/datasets/audio.py
 
 def inv_linear_spectrogram_tensorflow(spectrogram, hparams):
-	'''Builds computational graph to convert spectrogram to waveform using TensorFlow.
+    '''Builds computational graph to convert spectrogram to waveform using TensorFlow.
 	Unlike inv_spectrogram, this does NOT invert the preemphasis. The caller should call
 	inv_preemphasis on the output after running the graph.
 	'''
-	if hparams.signal_normalization:
-		D = _denormalize_tensorflow(spectrogram, hparams)
-	else:
-		D = linear_spectrogram
+    if hparams.signal_normalization:
+        D = _denormalize_tensorflow(spectrogram, hparams)
+    else:
+        D = linear_spectrogram
 
-	S = tf.pow(_db_to_amp_tensorflow(D + hparams.ref_level_db), (1/hparams.magnitude_power))
-	return _griffin_lim_tensorflow(tf.pow(S, hparams.power), hparams)
+    S = tf.pow(_db_to_amp_tensorflow(D + hparams.ref_level_db), (1 / hparams.magnitude_power))
+    return _griffin_lim_tensorflow(tf.pow(S, hparams.power), hparams)
+
 
 def inv_mel_spectrogram_tensorflow(mel_spectrogram, hparams):
-	'''Builds computational graph to convert mel spectrogram to waveform using TensorFlow.
+    '''Builds computational graph to convert mel spectrogram to waveform using TensorFlow.
 	Unlike inv_mel_spectrogram, this does NOT invert the preemphasis. The caller should call
 	inv_preemphasis on the output after running the graph.
 	'''
-	if hparams.signal_normalization:
-		D = _denormalize_tensorflow(mel_spectrogram, hparams)
-	else:
-		D = mel_spectrogram
+    if hparams.signal_normalization:
+        D = _denormalize_tensorflow(mel_spectrogram, hparams)
+    else:
+        D = mel_spectrogram
 
-	S = tf.pow(_db_to_amp_tensorflow(D + hparams.ref_level_db), (1/hparams.magnitude_power))
-	S = _mel_to_linear_tensorflow(S, hparams)  # Convert back to linear
-	return _griffin_lim_tensorflow(tf.pow(S, hparams.power), hparams)
+    S = tf.pow(_db_to_amp_tensorflow(D + hparams.ref_level_db), (1 / hparams.magnitude_power))
+    S = _mel_to_linear_tensorflow(S, hparams)  # Convert back to linear
+    return _griffin_lim_tensorflow(tf.pow(S, hparams.power), hparams)
+
 
 ###########################################################################################
 
 def _lws_processor(hparams):
-	import lws
-	return lws.lws(hparams.n_fft, get_hop_size(hparams), fftsize=hparams.win_size, mode="speech")
+    import lws
+    return lws.lws(hparams.n_fft, get_hop_size(hparams), fftsize=hparams.win_size, mode="speech")
+
 
 def _griffin_lim(S, hparams):
-	'''librosa implementation of Griffin-Lim
+    '''librosa implementation of Griffin-Lim
 	Based on https://github.com/librosa/librosa/issues/434
 	'''
-	angles = np.exp(2j * np.pi * np.random.rand(*S.shape))
-	S_complex = np.abs(S).astype(np.complex)
-	y = _istft(S_complex * angles, hparams)
-	for i in range(hparams.griffin_lim_iters):
-		angles = np.exp(1j * np.angle(_stft(y, hparams)))
-		y = _istft(S_complex * angles, hparams)
-	return y
+    angles = np.exp(2j * np.pi * np.random.rand(*S.shape))
+    S_complex = np.abs(S).astype(np.complex)
+    y = _istft(S_complex * angles, hparams)
+    for i in range(hparams.griffin_lim_iters):
+        angles = np.exp(1j * np.angle(_stft(y, hparams)))
+        y = _istft(S_complex * angles, hparams)
+    return y
+
 
 def _griffin_lim_tensorflow(S, hparams):
-	'''TensorFlow implementation of Griffin-Lim
+    '''TensorFlow implementation of Griffin-Lim
 	Based on https://github.com/Kyubyong/tensorflow-exercises/blob/master/Audio_Processing.ipynb
 	'''
-	with tf.variable_scope('griffinlim'):
-		# TensorFlow's stft and istft operate on a batch of spectrograms; create batch of size 1
-		S = tf.expand_dims(S, 0)
-		S_complex = tf.identity(tf.cast(S, dtype=tf.complex64))
-		y = tf.contrib.signal.inverse_stft(S_complex, hparams.win_size, get_hop_size(hparams), hparams.n_fft)
-		for i in range(hparams.griffin_lim_iters):
-			est = tf.contrib.signal.stft(y, hparams.win_size, get_hop_size(hparams), hparams.n_fft)
-			angles = est / tf.cast(tf.maximum(1e-8, tf.abs(est)), tf.complex64)
-			y = tf.contrib.signal.inverse_stft(S_complex * angles, hparams.win_size, get_hop_size(hparams), hparams.n_fft)
-	return tf.squeeze(y, 0)
+    with tf.variable_scope('griffinlim'):
+        # TensorFlow's stft and istft operate on a batch of spectrograms; create batch of size 1
+        S = tf.expand_dims(S, 0)
+        S_complex = tf.identity(tf.cast(S, dtype=tf.complex64))
+        y = tf.contrib.signal.inverse_stft(S_complex, hparams.win_size, get_hop_size(hparams), hparams.n_fft)
+        for i in range(hparams.griffin_lim_iters):
+            est = tf.contrib.signal.stft(y, hparams.win_size, get_hop_size(hparams), hparams.n_fft)
+            angles = est / tf.cast(tf.maximum(1e-8, tf.abs(est)), tf.complex64)
+            y = tf.contrib.signal.inverse_stft(S_complex * angles, hparams.win_size, get_hop_size(hparams),
+                                               hparams.n_fft)
+    return tf.squeeze(y, 0)
+
 
 def _stft(y, hparams):
-	if hparams.use_lws:
-		return _lws_processor(hparams).stft(y).T
-	else:
-		return librosa.stft(y=y, n_fft=hparams.n_fft, hop_length=get_hop_size(hparams), win_length=hparams.win_size, pad_mode='constant')
+    if hparams.use_lws:
+        return _lws_processor(hparams).stft(y).T
+    else:
+        return librosa.stft(y=y, n_fft=hparams.n_fft, hop_length=get_hop_size(hparams), win_length=hparams.win_size,
+                            pad_mode='constant')
+
 
 def _istft(y, hparams):
-	return librosa.istft(y, hop_length=get_hop_size(hparams), win_length=hparams.win_size)
+    return librosa.istft(y, hop_length=get_hop_size(hparams), win_length=hparams.win_size)
+
 
 ##########################################################
-#Those are only correct when using lws!!! (This was messing with Wavenet quality for a long time!)
+# Those are only correct when using lws!!! (This was messing with Wavenet quality for a long time!)
 def num_frames(length, fsize, fshift):
-	"""Compute number of time frames of spectrogram
+    """Compute number of time frames of spectrogram
 	"""
-	pad = (fsize - fshift)
-	if length % fshift == 0:
-		M = (length + pad * 2 - fsize) // fshift + 1
-	else:
-		M = (length + pad * 2 - fsize) // fshift + 2
-	return M
+    pad = (fsize - fshift)
+    if length % fshift == 0:
+        M = (length + pad * 2 - fsize) // fshift + 1
+    else:
+        M = (length + pad * 2 - fsize) // fshift + 2
+    return M
 
 
 def pad_lr(x, fsize, fshift):
-	"""Compute left and right padding
+    """Compute left and right padding
 	"""
-	M = num_frames(len(x), fsize, fshift)
-	pad = (fsize - fshift)
-	T = len(x) + 2 * pad
-	r = (M - 1) * fshift + fsize - T
-	return pad, pad + r
+    M = num_frames(len(x), fsize, fshift)
+    pad = (fsize - fshift)
+    T = len(x) + 2 * pad
+    r = (M - 1) * fshift + fsize - T
+    return pad, pad + r
+
+
 ##########################################################
-#Librosa correct padding
+# Librosa correct padding
 def librosa_pad_lr(x, fsize, fshift, pad_sides=1):
-	'''compute right padding (final frame) or both sides padding (first and final frames)
+    '''compute right padding (final frame) or both sides padding (first and final frames)
 	'''
-	assert pad_sides in (1, 2)
-	# return int(fsize // 2)
-	pad = (x.shape[0] // fshift + 1) * fshift - x.shape[0]
-	if pad_sides == 1:
-		return 0, pad
-	else:
-		return pad // 2, pad // 2 + pad % 2
+    assert pad_sides in (1, 2)
+    # return int(fsize // 2)
+    pad = (x.shape[0] // fshift + 1) * fshift - x.shape[0]
+    if pad_sides == 1:
+        return 0, pad
+    else:
+        return pad // 2, pad // 2 + pad % 2
+
 
 # Conversions
 _mel_basis = None
 _inv_mel_basis = None
 
+
 def _linear_to_mel(spectogram, hparams):
-	global _mel_basis
-	if _mel_basis is None:
-		_mel_basis = _build_mel_basis(hparams)
-	return np.dot(_mel_basis, spectogram)
+    global _mel_basis
+    if _mel_basis is None:
+        _mel_basis = _build_mel_basis(hparams)
+    return np.dot(_mel_basis, spectogram)
+
 
 def _mel_to_linear(mel_spectrogram, hparams):
-	global _inv_mel_basis
-	if _inv_mel_basis is None:
-		_inv_mel_basis = np.linalg.pinv(_build_mel_basis(hparams))
-	return np.maximum(1e-10, np.dot(_inv_mel_basis, mel_spectrogram))
+    global _inv_mel_basis
+    if _inv_mel_basis is None:
+        _inv_mel_basis = np.linalg.pinv(_build_mel_basis(hparams))
+    return np.maximum(1e-10, np.dot(_inv_mel_basis, mel_spectrogram))
+
 
 def _mel_to_linear_tensorflow(mel_spectrogram, hparams):
-	global _inv_mel_basis
-	if _inv_mel_basis is None:
-		_inv_mel_basis = np.linalg.pinv(_build_mel_basis(hparams))
-	return tf.transpose(tf.maximum(1e-10, tf.matmul(tf.cast(_inv_mel_basis, tf.float32), tf.transpose(mel_spectrogram, [1, 0]))), [1, 0])
+    global _inv_mel_basis
+    if _inv_mel_basis is None:
+        _inv_mel_basis = np.linalg.pinv(_build_mel_basis(hparams))
+    return tf.transpose(
+        tf.maximum(1e-10, tf.matmul(tf.cast(_inv_mel_basis, tf.float32), tf.transpose(mel_spectrogram, [1, 0]))),
+        [1, 0])
+
 
 def _build_mel_basis(hparams):
-	assert hparams.fmax <= hparams.sample_rate // 2
-	return librosa.filters.mel(hparams.sample_rate, hparams.n_fft, n_mels=hparams.num_mels,
-							   fmin=hparams.fmin, fmax=hparams.fmax)
+    assert hparams.fmax <= hparams.sample_rate // 2
+    return librosa.filters.mel(hparams.sample_rate, hparams.n_fft, n_mels=hparams.num_mels,
+                               fmin=hparams.fmin, fmax=hparams.fmax)
+
 
 def _amp_to_db(x, hparams):
-	min_level = np.exp(hparams.min_level_db / 20 * np.log(10))
-	return 20 * np.log10(np.maximum(min_level, x))
+    min_level = np.exp(hparams.min_level_db / 20 * np.log(10))
+    return 20 * np.log10(np.maximum(min_level, x))
+
 
 def _db_to_amp(x):
-	return np.power(10.0, (x) * 0.05)
+    return np.power(10.0, (x) * 0.05)
+
 
 def _db_to_amp_tensorflow(x):
-	return tf.pow(tf.ones(tf.shape(x)) * 10.0, x * 0.05)
+    return tf.pow(tf.ones(tf.shape(x)) * 10.0, x * 0.05)
+
 
 def _normalize(S, hparams):
-	if hparams.allow_clipping_in_normalization:
-		if hparams.symmetric_mels:
-			return np.clip((2 * hparams.max_abs_value) * ((S - hparams.min_level_db) / (-hparams.min_level_db)) - hparams.max_abs_value,
-			 -hparams.max_abs_value, hparams.max_abs_value)
-		else:
-			return np.clip(hparams.max_abs_value * ((S - hparams.min_level_db) / (-hparams.min_level_db)), 0, hparams.max_abs_value)
+    if hparams.allow_clipping_in_normalization:
+        if hparams.symmetric_mels:
+            return np.clip((2 * hparams.max_abs_value) * (
+                        (S - hparams.min_level_db) / (-hparams.min_level_db)) - hparams.max_abs_value,
+                           -hparams.max_abs_value, hparams.max_abs_value)
+        else:
+            return np.clip(hparams.max_abs_value * ((S - hparams.min_level_db) / (-hparams.min_level_db)), 0,
+                           hparams.max_abs_value)
 
-	assert S.max() <= 0 and S.min() - hparams.min_level_db >= 0
-	if hparams.symmetric_mels:
-		return (2 * hparams.max_abs_value) * ((S - hparams.min_level_db) / (-hparams.min_level_db)) - hparams.max_abs_value
-	else:
-		return hparams.max_abs_value * ((S - hparams.min_level_db) / (-hparams.min_level_db))
+    assert S.max() <= 0 and S.min() - hparams.min_level_db >= 0
+    if hparams.symmetric_mels:
+        return (2 * hparams.max_abs_value) * (
+                    (S - hparams.min_level_db) / (-hparams.min_level_db)) - hparams.max_abs_value
+    else:
+        return hparams.max_abs_value * ((S - hparams.min_level_db) / (-hparams.min_level_db))
+
 
 def _denormalize(D, hparams):
-	if hparams.allow_clipping_in_normalization:
-		if hparams.symmetric_mels:
-			return (((np.clip(D, -hparams.max_abs_value,
-				hparams.max_abs_value) + hparams.max_abs_value) * -hparams.min_level_db / (2 * hparams.max_abs_value))
-				+ hparams.min_level_db)
-		else:
-			return ((np.clip(D, 0, hparams.max_abs_value) * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
+    if hparams.allow_clipping_in_normalization:
+        if hparams.symmetric_mels:
+            return (((np.clip(D, -hparams.max_abs_value,
+                              hparams.max_abs_value) + hparams.max_abs_value) * -hparams.min_level_db / (
+                                 2 * hparams.max_abs_value))
+                    + hparams.min_level_db)
+        else:
+            return ((np.clip(D, 0,
+                             hparams.max_abs_value) * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
 
-	if hparams.symmetric_mels:
-		return (((D + hparams.max_abs_value) * -hparams.min_level_db / (2 * hparams.max_abs_value)) + hparams.min_level_db)
-	else:
-		return ((D * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
+    if hparams.symmetric_mels:
+        return (((D + hparams.max_abs_value) * -hparams.min_level_db / (
+                    2 * hparams.max_abs_value)) + hparams.min_level_db)
+    else:
+        return ((D * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
+
 
 def _denormalize_tensorflow(D, hparams):
-	if hparams.allow_clipping_in_normalization:
-		if hparams.symmetric_mels:
-			return (((tf.clip_by_value(D, -hparams.max_abs_value,
-				hparams.max_abs_value) + hparams.max_abs_value) * -hparams.min_level_db / (2 * hparams.max_abs_value))
-				+ hparams.min_level_db)
-		else:
-			return ((tf.clip_by_value(D, 0, hparams.max_abs_value) * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
+    if hparams.allow_clipping_in_normalization:
+        if hparams.symmetric_mels:
+            return (((tf.clip_by_value(D, -hparams.max_abs_value,
+                                       hparams.max_abs_value) + hparams.max_abs_value) * -hparams.min_level_db / (
+                                 2 * hparams.max_abs_value))
+                    + hparams.min_level_db)
+        else:
+            return ((tf.clip_by_value(D, 0,
+                                      hparams.max_abs_value) * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
 
-	if hparams.symmetric_mels:
-		return (((D + hparams.max_abs_value) * -hparams.min_level_db / (2 * hparams.max_abs_value)) + hparams.min_level_db)
-	else:
-		return ((D * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
-
-
+    if hparams.symmetric_mels:
+        return (((D + hparams.max_abs_value) * -hparams.min_level_db / (
+                    2 * hparams.max_abs_value)) + hparams.min_level_db)
+    else:
+        return ((D * -hparams.min_level_db / hparams.max_abs_value) + hparams.min_level_db)
 
 
 # given a path, return list of all files in directory
@@ -349,12 +393,13 @@ def get_list_of_wav_files(file_path):
 def convert_to_flac(dir_path):
     for file_path in os.listdir(dir_path):
         if file_path.split('.')[-1] != "flac":
-            read_file = AudioSegment.from_file(os.path.join(dir_path,file_path), file_path.split('.')[-1])
-            os.remove(os.path.join(dir_path,file_path))
+            read_file = AudioSegment.from_file(os.path.join(dir_path, file_path), file_path.split('.')[-1])
+            os.remove(os.path.join(dir_path, file_path))
             base_name = file_path.split('.')[:-1]
             # read_file = read_file.set_channels(8)
             # base_name = ".".join(base_name)
-            read_file.export(os.path.join(dir_path,f"{base_name[0]}.flac"), format="flac")
+            read_file.export(os.path.join(dir_path, f"{base_name[0]}.flac"), format="flac")
+
 
 def get_target(file_path):
     if '/real/' in file_path:
@@ -459,7 +504,7 @@ def convert_audio_to_processed_list(input_audio_array_list, filename, dirpath):
     out_list = []
     if (label_name == 'spoof'):
         audio_array_list = [input_audio_array_list[0]]
-        choose_random_one_ind = np.random.choice(np.arange(1,len(input_audio_array_list)))
+        choose_random_one_ind = np.random.choice(np.arange(1, len(input_audio_array_list)))
         audio_array_list.append(input_audio_array_list[choose_random_one_ind])
         label = 0
     elif (label_name == 'bonafide') or ('target' in label_name):
@@ -477,8 +522,8 @@ def convert_audio_to_processed_list(input_audio_array_list, filename, dirpath):
             print(f"Removing {filename} since it does not have label")
             os.remove(os.path.join(dirpath, 'flac', filename))
         out_list.append([mel_spec_array, label])
-    return out_list
 
+    return out_list
 
 
 def process_audio_files_with_aug(filename, dirpath):
@@ -491,13 +536,12 @@ def process_audio_files_with_aug(filename, dirpath):
     aug_noise = naa.NoiseAug(noise_factor=0.03)
     audio_array_noise = aug_noise.augment(audio_array)
 
-    audio_array_list= [audio_array,audio_array_crop,audio_array_loud,
-                       audio_array_noise ]
+    audio_array_list = [audio_array, audio_array_crop, audio_array_loud,
+                        audio_array_noise]
 
     out_list = convert_audio_to_processed_list(audio_array_list, filename, dirpath)
 
     return out_list
-
 
 
 def preprocess_and_save_audio_from_ray_parallel(dirpath, mode, recompute=False, dir_num=None, isaug=False):
@@ -515,7 +559,7 @@ def preprocess_and_save_audio_from_ray_parallel(dirpath, mode, recompute=False, 
         base_path = base_data_path[0]
     if not os.path.isfile(os.path.join(f'{base_path}/preprocessed_data', preproc_filename)) or recompute:
         filenames = os.listdir(os.path.join(dirpath, 'flac'))
-        num_cores = multiprocessing.cpu_count()-1
+        num_cores = multiprocessing.cpu_count() - 1
         if isaug:
             precproc_list_saved = Parallel(n_jobs=num_cores)(
                 delayed(process_audio_files_with_aug)(filename, dirpath) for filename in tqdm(filenames))
@@ -540,29 +584,53 @@ def preprocess_and_save_audio_from_ray_parallel(dirpath, mode, recompute=False, 
 
 
 def process_audio_files_inference(filename, dirpath, mode):
-   audio_array, sample_rate = librosa.load(os.path.join(dirpath, mode, filename), sr=16000)
-   trim_audio_array, index = librosa.effects.trim(audio_array)
-   mel_spec_array = melspectrogram(trim_audio_array, hparams=hparams).T
-   if mode == 'unlabeled':
-       return mel_spec_array
-   elif mode == 'real':
-       label = 1
-   elif mode == 'fake':
-       label = 0
-   return mel_spec_array, label
+    audio_array, sample_rate = librosa.load(os.path.join(
+        dirpath, mode, filename
+    ), sr=16000)
 
+    trim_audio_array, index = librosa.effects.trim(audio_array)
+    mel_spec_array = melspectrogram(
+        trim_audio_array, hparams=hparams
+    ).T
 
-def preprocess_from_ray_parallel_inference(dirpath, mode, use_parallel=True):
-   filenames = os.listdir(os.path.join(dirpath, mode))
-   if use_parallel:
-       num_cores = multiprocessing.cpu_count()
-       preproc_list = Parallel(n_jobs=num_cores)(
-           delayed(process_audio_files_inference)(filename, dirpath, mode) for filename in tqdm(filenames))
-   else:
-       preproc_list=[]
-       for filename in tqdm(filenames):
-           preproc_list.append(process_audio_files_inference(filename, dirpath, mode))
-   return preproc_list
+    if mode == 'unlabeled':
+        return mel_spec_array
+    elif mode == 'real':
+        label = 1
+    elif mode == 'fake':
+        label = 0
+    else:
+        raise ValueError(f'BAD MODE {mode}')
+
+    return mel_spec_array, label
+
+def preprocess_from_filenames(
+    filenames, mode, use_parallel=True
+):
+    if use_parallel:
+        num_cores = multiprocessing.cpu_count()
+        preproc_list = Parallel(n_jobs=num_cores)(
+            delayed(process_audio_files_inference)(
+                filename, dirpath, mode
+            ) for filename in tqdm(filenames)
+        )
+    else:
+        preproc_list = []
+        for filename in tqdm(filenames):
+            preproc_list.append(process_audio_files_inference(
+                filename, dirpath, mode
+            ))
+
+    return preproc_list
+
+def preprocess_from_ray_parallel_inference(
+    dirpath, mode, use_parallel=True
+):
+    filenames = os.listdir(os.path.join(dirpath, mode))
+    return preprocess_from_filenames(
+        filenames=filenames, mode=mode,
+        use_parallel=use_parallel
+    )
 
 
 def preprocess_and_save_audio_from_ray(dirpath, mode, recompute=False):
@@ -660,15 +728,16 @@ def truncate_array(batch_input):
         batch_input[i] = arr[:min_arr_len]
     return batch_input
 
+
 def random_truncate_array(batch_input):
     min_arr_len = np.min([len(x) for x in batch_input])
     for i, arr in enumerate(batch_input):
-        upper_limit_start_point = len(arr)-min_arr_len
-        if upper_limit_start_point>0:
-            start_point = np.random.randint(0,upper_limit_start_point)
+        upper_limit_start_point = len(arr) - min_arr_len
+        if upper_limit_start_point > 0:
+            start_point = np.random.randint(0, upper_limit_start_point)
         else:
             start_point = 0
-        batch_input[i] = arr[start_point:(start_point+min_arr_len)]
+        batch_input[i] = arr[start_point:(start_point + min_arr_len)]
     return batch_input
 
 
@@ -700,17 +769,17 @@ class f1_score_callback(keras.callbacks.Callback):
                 self.model.save(self.model_save_filename)
 
         try:
-            foundations.log_metric('epoch_val_f1_score',self._val_f1)
+            foundations.log_metric('epoch_val_f1_score', self._val_f1)
             foundations.log_metric('best_f1_score', max(self.f1_score_value))
         except Exception as e:
             print(e)
-
 
         return
 
 
 class DataGenerator(keras.utils.Sequence):
-    def __init__(self, x_set, y_set=None, sample_weights=None, batch_size=model_params['batch_size'], shuffle=False, mode='train'):
+    def __init__(self, x_set, y_set=None, sample_weights=None, batch_size=model_params['batch_size'], shuffle=False,
+                 mode='train'):
         self.x, self.y = x_set, y_set
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -752,24 +821,23 @@ def customPooling(x):
     target = x[1]
     inputs = x[0]
     maskVal = 0
-    #getting the mask by observing the model's inputs
+    # getting the mask by observing the model's inputs
     mask = K.equal(inputs, maskVal)
     mask = K.all(mask, axis=-1, keepdims=True)
 
-    #inverting the mask for getting the valid steps for each sample
+    # inverting the mask for getting the valid steps for each sample
     mask = 1 - K.cast(mask, K.floatx())
 
-    #summing the valid steps for each sample
+    # summing the valid steps for each sample
     stepsPerSample = K.sum(mask, axis=1, keepdims=False)
 
-    #applying the mask to the target (to make sure you are summing zeros below)
+    # applying the mask to the target (to make sure you are summing zeros below)
     target = target * mask
 
-    #calculating the mean of the steps (using our sum of valid steps as averager)
+    # calculating the mean of the steps (using our sum of valid steps as averager)
     means = K.sum(target, axis=1, keepdims=False) / stepsPerSample
 
     return means
-
 
 
 def build_custom_convnet():
@@ -812,14 +880,14 @@ def build_custom_convnet():
                 convnet_7[ly - model_params['residual_con']])
             convnet_7[ly] = Add(name=f'residual_con_7_{ly}')([convnet_7[ly], res_conv_7])
 
-        if ly<(num_conv_blocks-1):
+        if ly < (num_conv_blocks - 1):
             convnet[ly] = SpatialDropout1D(spatial_dropout_fraction)(convnet[ly])
             convnet_5[ly] = SpatialDropout1D(spatial_dropout_fraction)(convnet_5[ly])
             convnet_7[ly] = SpatialDropout1D(spatial_dropout_fraction)(convnet_7[ly])
 
-    dense = Lambda(lambda x: customPooling(x))([image_input,convnet[ly]])
-    dense_5 = Lambda(lambda x: customPooling(x))([image_input,convnet_5[ly]])
-    dense_7 = Lambda(lambda x: customPooling(x))([image_input,convnet_7[ly]])
+    dense = Lambda(lambda x: customPooling(x))([image_input, convnet[ly]])
+    dense_5 = Lambda(lambda x: customPooling(x))([image_input, convnet_5[ly]])
+    dense_7 = Lambda(lambda x: customPooling(x))([image_input, convnet_7[ly]])
 
     dense = Concatenate()([dense, dense_5, dense_7])
 
@@ -840,7 +908,6 @@ def build_custom_convnet():
     return model
 
 
-
 class Discriminator_Model():
     def __init__(self, load_pretrained=False, saved_model_name=None, real_test_mode=False):
 
@@ -851,11 +918,13 @@ class Discriminator_Model():
             self.model = build_custom_convnet()
             self.model.summary()
         else:
-            self.model = load_model(os.path.join(f"./{model_params['model_save_dir']}",saved_model_name), custom_objects={'customPooling': customPooling})
-        self.model_name = f"saved_model_{'_'.join(str(v) for k,v in model_params.items())}.h5"
-        self.real_test_model_name = f"real_test_saved_model_{'_'.join(str(v) for k,v in model_params.items())}.h5"
+            self.model = load_model(os.path.join(f"./{model_params['model_save_dir']}", saved_model_name),
+                                    custom_objects={'customPooling': customPooling})
+        self.model_name = f"saved_model_{'_'.join(str(v) for k, v in model_params.items())}.h5"
+        self.real_test_model_name = f"real_test_saved_model_{'_'.join(str(v) for k, v in model_params.items())}.h5"
         self.model_save_filename = os.path.join(f"./{model_params['model_save_dir']}", self.model_name)
-        self.real_test_model_save_filename = os.path.join(f"./{model_params['model_save_dir']}", self.real_test_model_name)
+        self.real_test_model_save_filename = os.path.join(f"./{model_params['model_save_dir']}",
+                                                          self.real_test_model_name)
         if real_test_mode:
             if run_on_foundations:
                 self.real_test_data_dir = "/data/inference_data/"
@@ -863,7 +932,8 @@ class Discriminator_Model():
                 self.real_test_data_dir = "../data/inference_data/"
 
             # preprocess the files
-            self.real_test_processed_data_real = preprocess_from_ray_parallel_inference(self.real_test_data_dir, "real", use_parallel=True)
+            self.real_test_processed_data_real = preprocess_from_ray_parallel_inference(self.real_test_data_dir, "real",
+                                                                                        use_parallel=True)
             self.real_test_processed_data_fake = preprocess_from_ray_parallel_inference(self.real_test_data_dir,
                                                                                         "fake",
                                                                                         use_parallel=True)
@@ -901,14 +971,14 @@ class Discriminator_Model():
         train_generator = DataGenerator(xtrain, ytrain)
         validation_generator = DataGenerator(xval, yval)
         self.model.fit_generator(train_generator,
-                                 steps_per_epoch = len(train_generator),
-                                 epochs = model_params['epochs'],
+                                 steps_per_epoch=len(train_generator),
+                                 epochs=model_params['epochs'],
                                  validation_data=validation_generator,
-                                 callbacks = callbacks,
-                                 shuffle = False,
-                                  use_multiprocessing = True,
-                                  verbose = 1,
-                                 class_weight =class_weights)
+                                 callbacks=callbacks,
+                                 shuffle=False,
+                                 use_multiprocessing=True,
+                                 verbose=1,
+                                 class_weight=class_weights)
 
         self.model = load_model(self.model_save_filename, custom_objects={'customPooling': customPooling})
 
@@ -916,7 +986,6 @@ class Discriminator_Model():
             foundations.save_artifact(self.model_save_filename, key='trained_model.h5')
         except:
             print("foundations command not found")
-
 
     def inference_on_real_data(self, threshold=0.5):
         datagen_val = DataGenerator(self.real_test_features, mode='test', batch_size=1)
@@ -926,7 +995,6 @@ class Discriminator_Model():
         acc_score = accuracy_score(self.real_test_labels, y_pred_labels)
         f1_score_val = f1_score(self.real_test_labels, y_pred_labels)
         return acc_score, f1_score_val
-
 
     def get_labels_from_prob(self, y, threshold=0.5):
         y_pred_labels = np.zeros((len(y)))
@@ -964,7 +1032,8 @@ class Discriminator_Model():
         val_f1_score = f1_score(yval_pred_labels, yval)
         print(f"train f1 score: {train_f1_score}, val f1 score: {val_f1_score}")
 
-        f1_train_partial = partial(self.get_f1score_for_optimization, y_true=ytrain.copy(), y_pred=ytrain_pred.copy(), ismin=True)
+        f1_train_partial = partial(self.get_f1score_for_optimization, y_true=ytrain.copy(), y_pred=ytrain_pred.copy(),
+                                   ismin=True)
         n_searches = 50
         dim_0 = Real(low=0.2, high=0.8, name='dim_0')
         dimensions = [dim_0]
@@ -976,26 +1045,24 @@ class Discriminator_Model():
                                     verbose=False)
 
         self.opt_threshold = search_result.x
-        if isinstance(self.opt_threshold,list):
+        if isinstance(self.opt_threshold, list):
             self.opt_threshold = self.opt_threshold[0]
         self.optimum_threshold_filename = f"model_threshold_{'_'.join(str(v) for k, v in model_params.items())}.npy"
-        np.save(os.path.join(f"{model_params['model_save_dir']}",self.optimum_threshold_filename), self.opt_threshold)
+        np.save(os.path.join(f"{model_params['model_save_dir']}", self.optimum_threshold_filename), self.opt_threshold)
         train_f1_score = self.get_f1score_for_optimization(self.opt_threshold, y_true=ytrain, y_pred=ytrain_pred)
-        val_f1_score = self.get_f1score_for_optimization(self.opt_threshold, y_true=yval, y_pred=yval_pred )
+        val_f1_score = self.get_f1score_for_optimization(self.opt_threshold, y_true=yval, y_pred=yval_pred)
         print(f"optimized train f1 score: {train_f1_score}, optimized val f1 score: {val_f1_score}")
-
-
 
     def evaluate(self, xtrain, ytrain, xval, yval, num_examples=1):
         ytrain_pred = self.predict_labels(xtrain, raw_prob=True)
         yval_pred = self.predict_labels(xval, raw_prob=True)
         try:
             self.optimum_threshold_filename = f"model_threshold_{'_'.join(str(v) for k, v in model_params.items())}.npy"
-            self.opt_threshold = np.load(os.path.join(f"{model_params['model_save_dir']}",self.optimum_threshold_filename)).item()
+            self.opt_threshold = np.load(
+                os.path.join(f"{model_params['model_save_dir']}", self.optimum_threshold_filename)).item()
             print(f"loaded optimum threshold: {self.opt_threshold}")
         except:
             self.opt_threshold = 0.5
-
 
         ytrain_pred_labels = self.get_labels_from_prob(ytrain_pred, threshold=self.opt_threshold)
         yval_pred_labels = self.get_labels_from_prob(yval_pred, threshold=self.opt_threshold)
@@ -1005,15 +1072,15 @@ class Discriminator_Model():
 
         train_f1_score = f1_score(ytrain, ytrain_pred_labels)
         val_f1_score = f1_score(yval, yval_pred_labels)
-        print (f"train accuracy: {train_accuracy}, train_f1_score: {train_f1_score},"
-               f"val accuracy: {val_accuracy}, val_f1_score: {val_f1_score} ")
+        print(f"train accuracy: {train_accuracy}, train_f1_score: {train_f1_score},"
+              f"val accuracy: {val_accuracy}, val_f1_score: {val_f1_score} ")
 
         try:
-            foundations.log_metric('train_accuracy',np.round(train_accuracy,2))
-            foundations.log_metric('val_accuracy', np.round(val_accuracy,2))
-            foundations.log_metric('train_f1_score', np.round(train_f1_score,2))
-            foundations.log_metric('val_f1_score', np.round(val_f1_score,2))
-            foundations.log_metric('optimum_threshold', np.round(self.opt_threshold,2))
+            foundations.log_metric('train_accuracy', np.round(train_accuracy, 2))
+            foundations.log_metric('val_accuracy', np.round(val_accuracy, 2))
+            foundations.log_metric('train_f1_score', np.round(train_f1_score, 2))
+            foundations.log_metric('val_f1_score', np.round(val_f1_score, 2))
+            foundations.log_metric('optimum_threshold', np.round(self.opt_threshold, 2))
         except Exception as e:
             print(e)
 
@@ -1024,44 +1091,47 @@ class Discriminator_Model():
         ind_tn = np.argwhere(np.equal((yval_pred_labels + yval).astype(int), 0)).reshape(-1, )
 
         # False Positive Example
-        ind_fp =np.argwhere( np.greater(yval_pred_labels, yval)).reshape(-1, )
+        ind_fp = np.argwhere(np.greater(yval_pred_labels, yval)).reshape(-1, )
 
         # False Negative Example
         ind_fn = np.argwhere(np.greater(yval, yval_pred_labels)).reshape(-1, )
-
 
         path_to_save_spetrograms = './spectrograms'
         if not os.path.isdir(path_to_save_spetrograms):
             os.makedirs(path_to_save_spetrograms)
         specs_saved = os.listdir(path_to_save_spetrograms)
-        if len(specs_saved)>0:
+        if len(specs_saved) > 0:
             for file_ in specs_saved:
-                os.remove(os.path.join(path_to_save_spetrograms,file_))
+                os.remove(os.path.join(path_to_save_spetrograms, file_))
 
-        ind_random_tp = np.random.choice(ind_tp, num_examples).reshape(-1,)
+        ind_random_tp = np.random.choice(ind_tp, num_examples).reshape(-1, )
         tp_x = [xtrain[i] for i in ind_random_tp]
 
-        ind_random_tn = np.random.choice(ind_tn, num_examples).reshape(-1,)
+        ind_random_tn = np.random.choice(ind_tn, num_examples).reshape(-1, )
         tn_x = [xtrain[i] for i in ind_random_tn]
 
-        ind_random_fp = np.random.choice(ind_fp, num_examples).reshape(-1,)
+        ind_random_fp = np.random.choice(ind_fp, num_examples).reshape(-1, )
         fp_x = [xtrain[i] for i in ind_random_fp]
 
-        ind_random_fn = np.random.choice(ind_fn, num_examples).reshape(-1,)
+        ind_random_fn = np.random.choice(ind_fn, num_examples).reshape(-1, )
         fn_x = [xtrain[i] for i in ind_random_fn]
 
         print("Plotting spectrograms to show what the hell the model has learned")
         for i in range(num_examples):
             plot_spectrogram(tp_x[i], path=os.path.join(path_to_save_spetrograms, f'true_positive_{i}.png'))
-            plot_spectrogram(tn_x[i], path=os.path.join(path_to_save_spetrograms,f'true_negative_{i}.png'))
-            plot_spectrogram(fp_x[i], path=os.path.join(path_to_save_spetrograms,f'false_positive_{i}.png'))
-            plot_spectrogram(fn_x[i], path=os.path.join(path_to_save_spetrograms,f'fale_negative_{i}.png'))
+            plot_spectrogram(tn_x[i], path=os.path.join(path_to_save_spetrograms, f'true_negative_{i}.png'))
+            plot_spectrogram(fp_x[i], path=os.path.join(path_to_save_spetrograms, f'false_positive_{i}.png'))
+            plot_spectrogram(fn_x[i], path=os.path.join(path_to_save_spetrograms, f'fale_negative_{i}.png'))
 
         try:
-            foundations.save_artifact(os.path.join(path_to_save_spetrograms, f'true_positive_{i}.png'), key='true_positive_example')
-            foundations.save_artifact(os.path.join(path_to_save_spetrograms,f'true_negative_{i}.png'), key='true_negative_example')
-            foundations.save_artifact(os.path.join(path_to_save_spetrograms,f'false_positive_{i}.png'), key='false_positive_example')
-            foundations.save_artifact(os.path.join(path_to_save_spetrograms,f'fale_negative_{i}.png'), key='false_negative_example')
+            foundations.save_artifact(os.path.join(path_to_save_spetrograms, f'true_positive_{i}.png'),
+                                      key='true_positive_example')
+            foundations.save_artifact(os.path.join(path_to_save_spetrograms, f'true_negative_{i}.png'),
+                                      key='true_negative_example')
+            foundations.save_artifact(os.path.join(path_to_save_spetrograms, f'false_positive_{i}.png'),
+                                      key='false_positive_example')
+            foundations.save_artifact(os.path.join(path_to_save_spetrograms, f'fale_negative_{i}.png'),
+                                      key='false_negative_example')
 
         except Exception as e:
             print(e)
