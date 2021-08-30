@@ -850,9 +850,11 @@ def build_custom_convnet():
     num_dense_layers = model_params['num_dense_layers']
     num_dense_neurons = model_params['num_dense_neurons']
     learning_rate = model_params['learning_rate']
+
     convnet = []
     convnet_5 = []
     convnet_7 = []
+
     for ly in range(0, num_conv_blocks):
         if ly == 0:
             convnet.append(Conv1D(init_neurons, 3, strides=1, activation='linear', padding='causal')(image_input))
@@ -869,6 +871,7 @@ def build_custom_convnet():
         convnet[ly] = LeakyReLU()(convnet[ly])
         convnet_5[ly] = LeakyReLU()(convnet_5[ly])
         convnet_7[ly] = LeakyReLU()(convnet_7[ly])
+
         if model_params['residual_con'] > 0 and (ly - model_params['residual_con']) >= 0:
             res_conv = Conv1D(init_neurons * (ly * 2), 1, strides=1, activation='linear', padding='same')(
                 convnet[ly - model_params['residual_con']])
