@@ -14,18 +14,24 @@ mode = "unlabeled"  # real, fake, or unlabeled
 # convert_to_flac(os.path.join(data_dir,mode))
 
 dirpath = '../../datasets/train/audios'
-filenames = os.listdir(os.path.join(dirpath, mode))
+filenames = os.listdir(dirpath)
+# filenames = [f'{dirpath}/{filename}' for filename in filenames]
 filenames = filenames[:10]
-print(filenames)
+# print(filenames)
+# raise ValueError
 
 # preprocess the files
 processed_data = preprocess_from_filenames(
-    filenames, mode, use_parallel=False
+    filenames, dirpath, mode=None, use_parallel=False
 )
+
+print(f'PROCESSED DATA', processed_data[0])
+print(len(processed_data[0][0]), processed_data[0][0].shape)
 
 # Visualize the preprocessed data
 plot_spectrogram(
-    processed_data[0], path='visualize_inference_spectrogram.png'
+    processed_data[0][0],
+    path='visualize_inference_spectrogram.png'
 )
 
 
@@ -33,12 +39,13 @@ plot_spectrogram(
 pretrained_model_name = 'pretrained_model.h5'
 
 discriminator = Discriminator_Model(
-    load_pretrained=True, saved_model_name=pretrained_model_name
+    load_pretrained=True,
+    saved_model_name=pretrained_model_name
 )
 
 print("The probability of the clip being real is: {:.2%}".format(
     discriminator.predict_labels(
-        processed_data, raw_prob=True, batch_size=20
+        processed_data[0], raw_prob=True, batch_size=20
     )[0][0]
 ))
 

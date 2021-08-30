@@ -442,8 +442,11 @@ def split_title_line(title_text, max_words=5):
     return '\n'.join([' '.join(seq[i:i + max_words]) for i in range(0, len(seq), max_words)])
 
 
-def plot_spectrogram(pred_spectrogram, path, title=None, split_title=False, target_spectrogram=None, max_len=None,
-                     auto_aspect=False):
+def plot_spectrogram(
+    pred_spectrogram, path, title=None, split_title=False,
+    target_spectrogram=None, max_len=None, auto_aspect=False,
+    figsize=(10, 3)
+):
     if max_len is not None:
         target_spectrogram = target_spectrogram[:max_len]
         pred_spectrogram = pred_spectrogram[:max_len]
@@ -451,9 +454,12 @@ def plot_spectrogram(pred_spectrogram, path, title=None, split_title=False, targ
     if split_title:
         title = split_title_line(title)
 
-    fig = plt.figure(figsize=(10, 8))
+    fig = plt.figure(figsize=figsize)
     # Set common labels
-    fig.text(0.5, 0.18, title, horizontalalignment='center', fontsize=16)
+    fig.text(
+        0.5, 0.18, title, horizontalalignment='center',
+        fontsize=16
+    )
 
     # target spectrogram subplot
     if target_spectrogram is not None:
@@ -461,20 +467,44 @@ def plot_spectrogram(pred_spectrogram, path, title=None, split_title=False, targ
         ax2 = fig.add_subplot(312)
 
         if auto_aspect:
-            im = ax1.imshow(np.rot90(target_spectrogram), aspect='auto', interpolation='none')
+            im = ax1.imshow(
+                np.rot90(target_spectrogram, axes=(0, 1)),
+                aspect='auto', interpolation='none'
+            )
         else:
-            im = ax1.imshow(np.rot90(target_spectrogram), interpolation='none')
+            im = ax1.imshow(
+                np.rot90(target_spectrogram, axes=(0, 1)),
+                interpolation='none'
+            )
+
         ax1.set_title('Target Mel-Spectrogram')
-        fig.colorbar(mappable=im, shrink=0.65, orientation='horizontal', ax=ax1)
+        fig.colorbar(
+            mappable=im, shrink=0.65,
+            orientation='horizontal', ax=ax1
+        )
         ax2.set_title('Predicted Mel-Spectrogram')
     else:
         ax2 = fig.add_subplot(211)
 
     if auto_aspect:
-        im = ax2.imshow(np.rot90(pred_spectrogram), aspect='auto', interpolation='none')
+        im = ax2.imshow(
+            np.rot90(pred_spectrogram, axes=(0, 1)),
+            aspect='auto', interpolation='none'
+        )
     else:
-        im = ax2.imshow(np.rot90(pred_spectrogram), interpolation='none')
-    fig.colorbar(mappable=im, shrink=0.65, orientation='horizontal', ax=ax2)
+        m = np.asanyarray(pred_spectrogram)
+        print('M-SPEC', m)
+        print('SPEC DIM', m.ndim)
+
+        im = ax2.imshow(
+            np.rot90(pred_spectrogram, axes=(0, 1)),
+            interpolation='none'
+        )
+
+    fig.colorbar(
+        mappable=im, shrink=0.65,
+        orientation='horizontal', ax=ax2
+    )
 
     plt.tight_layout()
     plt.savefig(path, format='png')
@@ -583,11 +613,13 @@ def preprocess_and_save_audio_from_ray_parallel(dirpath, mode, recompute=False, 
         print("Preprocessing already done!")
 
 
-def process_audio_files_inference(filename, dirpath, mode):
-    audio_array, sample_rate = librosa.load(os.path.join(
-        dirpath, mode, filename
-    ), sr=16000)
+def process_audio_files_inference(filename, dirpath, mode=None):
+    if mode is None:
+        abs_path = os.path.join(dirpath, filename)
+    else:
+        abs_path = os.path.join(dirpath, mode, filename)
 
+    audio_array, sample_rate = librosa.load(abs_path, sr=16000)
     trim_audio_array, index = librosa.effects.trim(audio_array)
     mel_spec_array = melspectrogram(
         trim_audio_array, hparams=hparams
@@ -599,13 +631,15 @@ def process_audio_files_inference(filename, dirpath, mode):
         label = 1
     elif mode == 'fake':
         label = 0
+    elif mode is None:
+        label = None
     else:
         raise ValueError(f'BAD MODE {mode}')
 
     return mel_spec_array, label
 
 def preprocess_from_filenames(
-    filenames, mode, use_parallel=True
+    filenames, dirpath, mode, use_parallel=True
 ):
     if use_parallel:
         num_cores = multiprocessing.cpu_count()
@@ -921,8 +955,15 @@ class Discriminator_Model():
             self.model = build_custom_convnet()
             self.model.summary()
         else:
-            self.model = load_model(os.path.join(f"./{model_params['model_save_dir']}", saved_model_name),
-                                    custom_objects={'customPooling': customPooling})
+            self.model = load_model(
+                os.path.join(
+                    f"./{model_params['model_save_dir']}",
+                    saved_model_name
+                ), custom_objects={
+                    'customPooling': customPooling
+                }
+            )
+
         self.model_name = f"saved_model_{'_'.join(str(v) for k, v in model_params.items())}.h5"
         self.real_test_model_name = f"real_test_saved_model_{'_'.join(str(v) for k, v in model_params.items())}.h5"
         self.model_save_filename = os.path.join(f"./{model_params['model_save_dir']}", self.model_name)
