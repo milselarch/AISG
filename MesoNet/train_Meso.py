@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
 import torchvision
-from torch.utils.data import DataLoader
 import torch.optim as optim
-from torch.optim import lr_scheduler
 import argparse
 import os
 import cv2
 
+from torch.optim import lr_scheduler
+from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from network.classifier import *
 from network.transform import mesonet_data_transforms
@@ -45,6 +45,7 @@ def main(train_workers=4, validation_workers=2):
 		val_dataset, batch_size=batch_size, shuffle=True,
 		drop_last=False, num_workers=validation_workers
 	)
+
 	train_dataset_size = len(train_dataset)
 	val_dataset_size = len(val_dataset)
 
@@ -63,14 +64,15 @@ def main(train_workers=4, validation_workers=2):
 	"""
 
 	optimizer = optim.Adam(
-		model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08
+		model.parameters(), lr=0.001,
+		betas=(0.9, 0.999), eps=1e-08
 	)
 	scheduler = lr_scheduler.StepLR(
 		optimizer, step_size=5, gamma=0.5
 	)
 
-	#Train the model using multiple GPUs
-	#model = nn.DataParallel(model)
+	# Train the model using multiple GPUs
+	# model = nn.DataParallel(model)
 
 	best_model_wts = model.state_dict()
 	best_acc = 0.0
@@ -79,7 +81,7 @@ def main(train_workers=4, validation_workers=2):
 	for epoch in range(epoches):
 		print('Epoch {}/{}'.format(epoch+1, epoches))
 		print('-'*10)
-		model=model.train()
+		model = model.train()
 		train_loss = 0.0
 		train_corrects = 0.0
 		val_loss = 0.0
@@ -96,6 +98,7 @@ def main(train_workers=4, validation_workers=2):
 			loss = criterion(outputs, labels)
 			loss.backward()
 			optimizer.step()
+
 			iter_loss = loss.data.item()
 			train_loss += iter_loss
 			iter_corrects = torch.sum(
@@ -105,11 +108,17 @@ def main(train_workers=4, validation_workers=2):
 			iteration += 1
 
 			if not (iteration % 20):
-				print('iteration {} train loss: {:.4f} Acc: {:.4f}'.format(iteration, iter_loss / batch_size, iter_corrects / batch_size))
+				print(
+					f'iteration {iteration} ' +
+					f'train loss: {iter_loss / batch_size:.4f} ' +
+					f'Acc: {iter_corrects / batch_size:.4f}'
+				)
 
 		epoch_loss = train_loss / train_dataset_size
 		epoch_acc = train_corrects / train_dataset_size
-		print('epoch train loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
+		print('epoch train loss: {:.4f} Acc: {:.4f}'.format(
+			epoch_loss, epoch_acc
+		))
 
 		model.eval()
 
@@ -121,11 +130,15 @@ def main(train_workers=4, validation_workers=2):
 				_, preds = torch.max(outputs.data, 1)
 				loss = criterion(outputs, labels)
 				val_loss += loss.data.item()
-				val_corrects += torch.sum(preds == labels.data).to(torch.float32)
+				val_corrects += torch.sum(preds == labels.data).to(
+					torch.float32
+				)
 
 			epoch_loss = val_loss / val_dataset_size
 			epoch_acc = val_corrects / val_dataset_size
-			print('epoch val loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
+			print('epoch val loss: {:.4f} Acc: {:.4f}'.format(
+				epoch_loss, epoch_acc
+			))
 
 			if epoch_acc > best_acc:
 				best_acc = epoch_acc
@@ -134,14 +147,33 @@ def main(train_workers=4, validation_workers=2):
 		scheduler.step()
 
 		if not (epoch % 10):
-		#Save the model trained with multiple gpu
-		#torch.save(model.module.state_dict(), os.path.join(output_path, str(epoch) + '_' + model_name))
-			torch.save(model.state_dict(), os.path.join(output_path, str(epoch) + '_' + model_name))
-
+			# Save the model trained with multiple gpu
+			"""
+			torch.save(
+				model.module.state_dict(), 
+				os.path.join(output_path, 
+				str(epoch) + '_' + model_name)
+			)
+			"""
+			torch.save(
+				model.state_dict(),
+				os.path.join(
+					output_path, str(epoch) + '_' + model_name
+				)
+			)
+			
 	print('Best val Acc: {:.4f}'.format(best_acc))
 	model.load_state_dict(best_model_wts)
-	#torch.save(model.module.state_dict(), os.path.join(output_path, "best.pkl"))
-	torch.save(model.state_dict(), os.path.join(output_path, "best.pkl"))
+	"""
+	torch.save(
+		model.module.state_dict(),
+		os.path.join(output_path, "best.pkl")
+	)
+	"""
+	torch.save(
+		model.state_dict(),
+		os.path.join(output_path, "best.pkl")
+	)
 
 
 if __name__ == '__main__':
@@ -160,7 +192,13 @@ if __name__ == '__main__':
 	)
 	parse.add_argument('--batch_size', '-bz', type=int, default=64)
 	parse.add_argument('--epoches', '-e', type=int, default='50')
-	parse.add_argument('--model_name', '-mn', type=str, default='meso4.pkl')
+	parse.add_argument(
+		'--model_name', '-mn', type=str, default='meso4.pkl'
+	)
 	parse.add_argument('--continue_train', type=bool, default=False)
-	parse.add_argument('--model_path', '-mp', type=str, default='./output/Mesonet/best.pkl')
+	parse.add_argument(
+		'--model_path', '-mp', type=str,
+		default='./output/Mesonet/best.pkl'
+	)
+
 	main()

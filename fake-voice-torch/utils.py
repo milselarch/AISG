@@ -677,6 +677,7 @@ def process_audio_files(filename, dirpath):
     """
 
     label_name = filename.split('_')[-1].split('.')[0]
+
     if (label_name == 'bonafide') or ('target' in label_name):
         label = 1
     elif label_name == 'spoof':
@@ -760,7 +761,7 @@ def process_audio_files_with_aug(filename, dirpath):
 
 
 def preprocess_and_save_audio_from_ray_parallel(
-        dirpath, mode, recompute=False, dir_num=None, isaug=False
+    dirpath, mode, recompute=False, dir_num=None, isaug=False
 ):
     if isaug:
         preproc_filename = f'{mode}_preproc_aug.npy'
@@ -1611,23 +1612,23 @@ class Discriminator_Model(object):
 
         # True Positive Example
         ind_tp = np.argwhere(np.equal(
-            (yval_pred_labels + yval).astype(int), 2)
-        ).reshape(-1, )
+            (yval_pred_labels + yval).astype(int), 2
+        )).reshape(-1, )
 
         # True Negative Example
         ind_tn = np.argwhere(np.equal(
-            (yval_pred_labels + yval).astype(int), 0)
-        ).reshape(-1, )
+            (yval_pred_labels + yval).astype(int), 0
+        )).reshape(-1, )
 
         # False Positive Example
         ind_fp = np.argwhere(np.greater(
-            yval_pred_labels, yval)
-        ).reshape(-1, )
+            yval_pred_labels, yval
+        )).reshape(-1, )
 
         # False Negative Example
         ind_fn = np.argwhere(np.greater(
-            yval, yval_pred_labels)
-        ).reshape(-1, )
+            yval, yval_pred_labels
+        )).reshape(-1, )
 
         path_to_save_spetrograms = './spectrograms'
 

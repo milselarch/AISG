@@ -152,14 +152,15 @@ def run():
         max_face_mapping[filename] = (max_faces, p_detection)
         print(f'READ {k}/{length}', filename, max_faces, p_detection)
 
-    face_coords_df.to_csv(csv_filename)
+    face_coords_df.to_csv(csv_filename, index=False)
 
     with open(json_filename, 'w') as fp:
         json.dump(max_face_mapping, fp, indent=4)
 
 
-profile = cProfile.Profile()
-profile.enable()
-run()
-profile.disable()
-profile.dump_stats(profile_path)
+if __name__ == '__main__':
+    profile = cProfile.Profile()
+    profile.enable()
+    run()
+    profile.disable()
+    profile.dump_stats(profile_path)

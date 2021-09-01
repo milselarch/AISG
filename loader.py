@@ -27,6 +27,15 @@ class VideoArray(object):
         ])
         return f'{class_name}({kwargs})'
 
+    def get_grayscale_frames(self):
+        gray_frames = []
+
+        for frame in self.out_video:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray_frames.append(gray)
+
+        return gray_frames
+
     def get_face_images(self, video_faces, every_n_frames=20):
         frame_indexes = list(video_faces.keys())
         face_images = []

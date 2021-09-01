@@ -1,15 +1,17 @@
 import torch
 import torch.nn as nn
 import torchvision
-from torch.utils.data import DataLoader
 import torch.optim as optim
-from torch.optim import lr_scheduler
 import argparse
 import os
 import cv2
+
+from torch.utils.data import DataLoader
+from torch.optim import lr_scheduler
 from network.models import model_selection
 from dataset.transform import xception_default_data_transforms
 from dataset.mydataset import MyDataset
+
 def main():
 	args = parse.parse_args()
 	test_list = args.test_list
@@ -21,6 +23,7 @@ def main():
 	test_dataset_size = len(test_dataset)
 	corrects = 0
 	acc = 0
+
 	#model = torchvision.models.densenet121(num_classes=2)
 	model = model_selection(modelname='xception', num_out_classes=2, dropout=0.5)
 	model.load_state_dict(torch.load(model_path))
