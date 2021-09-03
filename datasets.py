@@ -10,6 +10,8 @@ from PIL import Image
 from matplotlib.pyplot import imshow
 from sklearn.model_selection import train_test_split
 
+class FailedVideoRead(Exception):
+    pass
 
 class Dataset(object):
     def __init__(
@@ -69,6 +71,7 @@ class Dataset(object):
 
     def load_video(self, filename):
         path = f'{self.basedir}/train/videos/{filename}'
+        # print(f'PATH', path)
         video = cv2.VideoCapture(path)
         return video
 
@@ -77,6 +80,10 @@ class Dataset(object):
         video_arr = loader.load_video(
             video_capture, filename=filename, *args, **kwargs
         )
+
+        if video_arr is None:
+            raise FailedVideoRead(f'{filename} failed to load')
+
         return video_arr
 
     def is_fake(self, filename: str):

@@ -9,7 +9,12 @@ __pycache__
 *.mp4
 .idea
 *.pkl
+*.npy
 *.jpg
 *.pth
+*.flac
+*.aac
 *.profile
 *.crdownload
+
+Dockerfile

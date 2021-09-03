@@ -745,14 +745,17 @@ def get_durations_from_dir(audio_dir, file_extension='.wav'):
 def get_zero_pad(batch_input):
     # find max length
     max_length = np.max([len(x) for x in batch_input])
+
     for i, arr in enumerate(batch_input):
         curr_length = len(arr)
         pad_length = max_length - curr_length
+
         if len(arr.shape) > 1:
             arr = np.concatenate([arr, np.zeros((pad_length, arr.shape[-1]))])
         else:
-            arr = np.concatenate([arr, np.zeros((pad_length))])
+            arr = np.concatenate([arr, np.zeros(pad_length)])
         batch_input[i] = arr
+
     return batch_input
 
 
@@ -812,15 +815,21 @@ class f1_score_callback(keras.callbacks.Callback):
 
 
 class DataGenerator(keras.utils.Sequence):
-    def __init__(self, x_set, y_set=None, sample_weights=None, batch_size=model_params['batch_size'], shuffle=False,
-                 mode='train'):
+    def __init__(
+        self, x_set, y_set=None, sample_weights=None,
+        batch_size=model_params['batch_size'], shuffle=False,
+        mode='train'
+    ):
         self.x, self.y = x_set, y_set
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.mode = mode
+
         self.sample_weights = sample_weights
+
         if self.mode != 'train':
             self.shuffle = False
+
         self.n = 0
         self.max = self.__len__()
 
@@ -828,13 +837,19 @@ class DataGenerator(keras.utils.Sequence):
         return int(np.ceil(len(self.x) / float(self.batch_size)))
 
     def __getitem__(self, idx):
-        batch_x = self.x[idx * self.batch_size:(idx + 1) * self.batch_size]
+        batch_x = self.x[
+            idx * self.batch_size:(idx + 1) * self.batch_size
+        ]
         batch_x = get_zero_pad(batch_x)
         # batch_x = random_truncate_array(batch_x)
         batch_x = np.array(batch_x)
         batch_x = batch_x.reshape((len(batch_x), -1, hparams.num_mels))
+
         if self.mode != 'test':
-            batch_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
+            batch_y = self.y[
+                idx * self.batch_size:(idx + 1) * self.batch_size
+            ]
+
         # read your data here using the batch lists, batch_x and batch_y
         if self.mode == 'train':
             return np.array(batch_x), np.array(batch_y)
@@ -933,15 +948,21 @@ def build_custom_convnet():
         dense = BatchNormalization()(dense)
         dense = LeakyReLU()(dense)
         dense = Dropout(model_params['dense_dropout'])(dense)
+
     output_layer = Dense(1)(dense)
     output_layer = Activation('sigmoid')(output_layer)
     model = Model(inputs=image_input, outputs=output_layer)
     opt = optimizers.Adam(lr=learning_rate)
+
     try:
         model = multi_gpu_model(model, gpus=4)
     except:
         pass
-    model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['accuracy'])
+
+    model.compile(
+        optimizer=opt, loss='binary_crossentropy',
+        metrics=['accuracy']
+    )
     return model
 
 
@@ -1060,6 +1081,7 @@ class Discriminator_Model():
         test_generator = DataGenerator(x, mode='test', batch_size=batch_size)
         y_pred = self.model.predict_generator(test_generator, steps=len(test_generator), max_queue_size=10)
         print(y_pred)
+
         if raw_prob:
             return y_pred
         else:

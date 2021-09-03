@@ -1,7 +1,7 @@
 import os
 from utils import *
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # see issue #152
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
@@ -21,7 +21,8 @@ processed_data = preprocess_from_ray_parallel_inference(
 
 # Visualize the preprocessed data
 plot_spectrogram(
-    processed_data[0], path='visualize_inference_spectrogram.png'
+    processed_data[0],
+    path='visualize_inference_spectrogram.png'
 )
 
 
@@ -29,7 +30,8 @@ plot_spectrogram(
 pretrained_model_name = 'pretrained_model.h5'
 
 discriminator = Discriminator_Model(
-    load_pretrained=True, saved_model_name=pretrained_model_name
+    load_pretrained=True,
+    saved_model_name=pretrained_model_name
 )
 
 print("The probability of the clip being real is: {:.2%}".format(

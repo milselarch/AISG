@@ -66,7 +66,7 @@ def fill_face_maps(np_frames, interval):
 def load_video(filename, scale, n_frames):
     try:
         vid_obj = dataset.read_video(
-            filename, rescale=scale,
+            filename, scale=scale,
             every_n_frames=n_frames
         )
     except ValueError as e:
@@ -94,20 +94,27 @@ def conditional_load(filename, scale, n_frames):
 
 def run():
     column = 0
+    pbar = tqdm(range(length))
 
-    for k in tqdm(range(length)):
+    for k in pbar:
         filename = dataset.all_videos[k]
-        load_result = conditional_load(
-            filename, scale=rescale, n_frames=every_n_frames
-        )
+        # pbar.set_description(filename)
 
-        if load_result is None:
+        try:
+            load_result = conditional_load(
+                filename, scale=rescale, n_frames=every_n_frames
+            )
+        except datasets.FailedVideoRead:
+            print(f'failed to load {filename} (no {k})')
             continue
 
         current_rescale = rescale
         num_frames, np_frames, max_faces, face_mapping = load_result
+        # print(f'NP FRAMES {np_frames} {np_frames.shape}')
+        max_dim = max(np_frames[0].shape)
+        # print('MAX_DIM', max_dim)
 
-        if max_faces == 0:
+        if (max_faces == 0) or (max_dim < 200):
             print(f'NO FACES DETECTED [{filename}] - UNSCALING')
             current_rescale = 1
 

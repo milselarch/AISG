@@ -188,8 +188,9 @@ class VideoArray(object):
 
 def load_video(
     cap, every_n_frames=None, specific_frames=None,
-    to_rgb=True, rescale=None, inc_pil=False,
-    max_frames=None, release=True, filename=None
+    to_rgb=True, scale=None, inc_pil=False,
+    max_frames=None, release=True, filename=None,
+    verbose=False
 ):
     """
     Loads a video.
@@ -215,12 +216,17 @@ def load_video(
     n_frames_in = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     width_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # print(f'NUM FRAMES {n_frames_in}')
 
-    if rescale:
-        rescale = rescale * 1920. / np.max((width_in, height_in))
+    if n_frames_in == 0:
+        return None
 
-    width_out = int(width_in * rescale) if rescale else width_in
-    height_out = int(height_in * rescale) if rescale else height_in
+    width_out = int(width_in * scale) if scale else width_in
+    height_out = int(height_in * scale) if scale else height_in
+
+    if verbose:
+        print(f'ORIGINAL RES', (width_in, height_in))
+        print(f'NEW RES', (width_out, height_out), scale)
 
     if max_frames:
         n_frames_in = min(n_frames_in, max_frames)
@@ -255,7 +261,7 @@ def load_video(
 
                     ret, frame_in = cap.retrieve()
 
-                if rescale:
+                if scale:
                     frame_in = cv2.resize(
                         frame_in, (width_out, height_out)
                     )
@@ -300,7 +306,7 @@ def load_video(
 
     return VideoArray(
         out_video, width=width_out, height=height_out,
-        frames=n_frames_out, out_pil=out_pil, rescale=rescale,
+        frames=n_frames_out, out_pil=out_pil, rescale=scale,
         raw_video=cap, name=filename
     )
 

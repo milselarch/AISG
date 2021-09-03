@@ -8,6 +8,7 @@ import datetime
 import torch
 import json
 import dlib
+import cv2
 
 from tqdm.auto import tqdm
 from matplotlib.pyplot import imshow
@@ -28,7 +29,7 @@ max_face_mapping = {}
 num_videos = len(dataset.all_videos)
 # num_videos = 10
 
-scale_down = 4
+scale_down = 2
 every_n_frames = 20
 n = every_n_frames
 cuda = True
@@ -56,30 +57,38 @@ model = model.cuda() if cuda else model
 
 
 def run():
-    for k in tqdm(range(num_videos)):
+    pbar = tqdm(range(150, num_videos))
+
+    for k in pbar:
         filename = dataset.all_videos[k]
-        vid_obj = dataset.read_video(
-            filename, every_n_frames=every_n_frames,
-            rescale=rescale
-        )
+        pbar.set_description(f"Processing {filename}")
+
+        try:
+            vid_obj = dataset.read_video(
+                filename, every_n_frames=every_n_frames,
+                scale=rescale
+            )
+        except datasets.FailedVideoRead:
+            print(f'FILENAME LOAD FAILED {filename}')
+            continue
+        except ValueError as e:
+            print(f'VALUE ERROR {filename} {k}')
+            raise e
 
         np_frames = vid_obj.out_video
-        gray_frames = vid_obj.get_grayscale_frames()
-
-        if np_frames is None:
-            return None
-
         num_frames = len(np_frames)
         video_frame_rows = base_faces[
             base_faces['filename'] == filename
         ]
 
+        print('FRAME ROWS', video_frame_rows)
         # print('FRAMES', frames_column)
         # print(240 in frames_column)
 
         for i in range(num_frames):
+            print(f'FRAME NO {i} {np_frames.shape}')
             frame_no = every_n_frames * i
-            gray_frame = gray_frames[i]
+            frane = np_frames[i]
             face_rows = video_frame_rows[
                 video_frame_rows["frames"] == frame_no
             ]
@@ -95,10 +104,21 @@ def run():
                 right = int(row["right"] * rescale)
                 bottom = int(row["bottom"] * rescale)
 
-                face_crop = gray_frame[top:bottom, left:right]
-                _, frame_output = predict_with_model(
-                    face_crop, model, cuda=cuda
-                )
+                coords = (top, left, right, bottom)
+                face_crop = frane[top:bottom, left:right]
+
+                try:
+                    _, frame_output = predict_with_model(
+                        face_crop, model, cuda=cuda
+                    )
+                except cv2.error as e:
+                    print('FACE CROP', face_crop)
+                    print('SCALE', rescale)
+                    print('ROW FAIL', row)
+                    print(f'SHAPE {face_crop.shape}')
+                    print(f'COORDS {coords}')
+                    print('FILENAME', filename)
+                    raise e
 
                 predictions = frame_output.cpu().detach().numpy()
                 prediction = predictions[0][1]

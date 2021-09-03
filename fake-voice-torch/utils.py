@@ -2,27 +2,14 @@ import os
 import numpy as np
 import matplotlib
 import nlpaug.augmenter.audio as naa
-import tensorflow as tf
-from keras.layers import Add, Lambda, Concatenate, SpatialDropout1D
-
-import keras
-from keras.layers import (
-    Input, Activation, Dense, Conv1D, Dropout, BatchNormalization
-)
-from keras.callbacks import (
-    EarlyStopping, ReduceLROnPlateau, TensorBoard
-)
-from keras.models import load_model, Model
-from keras import optimizers
-from keras.layers.advanced_activations import LeakyReLU
-from keras import backend as K
-from sklearn.metrics import f1_score, accuracy_score
-from tqdm import tqdm
 import matplotlib.pyplot as plt
 import librosa.display
 import librosa.filters
-from joblib import Parallel, delayed
 import multiprocessing
+
+from sklearn.metrics import f1_score, accuracy_score
+from tqdm import tqdm
+from joblib import Parallel, delayed
 from constants import model_params, base_data_path
 from scipy import signal
 from scipy.io import wavfile
@@ -30,7 +17,7 @@ from skopt import gp_minimize
 from skopt.space import Real
 from functools import partial
 from pydub import AudioSegment
-from keras.utils import multi_gpu_model
+# from keras.utils import multi_gpu_model
 
 from constants import *
 
@@ -78,6 +65,7 @@ def inv_preemphasis(wav, k, inv_preemphasize=True):
 # From https://github.com/r9y9/wavenet_vocoder/blob/master/audio.py
 def start_and_end_indices(quantized, silence_threshold=2):
     assert quantized.size > 0
+    start, end = 0, quantized.size - 1
 
     for start in range(quantized.size):
         if abs(quantized[start] - 127) > silence_threshold:
@@ -367,6 +355,7 @@ def librosa_pad_lr(x, fsize, fshift, pad_sides=1):
     assert pad_sides in (1, 2)
     # return int(fsize // 2)
     pad = (x.shape[0] // fshift + 1) * fshift - x.shape[0]
+
     if pad_sides == 1:
         return 0, pad
     else:
@@ -420,7 +409,7 @@ def _amp_to_db(x, hparams):
 
 
 def _db_to_amp(x):
-    return np.power(10.0, (x) * 0.05)
+    return np.power(10.0, x * 0.05)
 
 
 def _db_to_amp_tensorflow(x):
@@ -677,7 +666,6 @@ def process_audio_files(filename, dirpath):
     """
 
     label_name = filename.split('_')[-1].split('.')[0]
-
     if (label_name == 'bonafide') or ('target' in label_name):
         label = 1
     elif label_name == 'spoof':
@@ -731,31 +719,6 @@ def convert_audio_to_processed_list(
             os.remove(os.path.join(dirpath, 'flac', filename))
 
         out_list.append([mel_spec_array, label])
-
-    return out_list
-
-
-def process_audio_files_with_aug(filename, dirpath):
-    sr = 16000
-    audio_array, sample_rate = librosa.load(
-        os.path.join(dirpath, 'flac', filename), sr=sr
-    )
-
-    aug_crop = naa.CropAug(sampling_rate=sr)
-    audio_array_crop = aug_crop.augment(audio_array)
-    aug_loud = naa.LoudnessAug(loudness_factor=(2, 5))
-    audio_array_loud = aug_loud.augment(audio_array)
-    aug_noise = naa.NoiseAug(noise_factor=0.03)
-    audio_array_noise = aug_noise.augment(audio_array)
-
-    audio_array_list = [
-        audio_array, audio_array_crop, audio_array_loud,
-        audio_array_noise
-    ]
-
-    out_list = convert_audio_to_processed_list(
-        audio_array_list, filename, dirpath
-    )
 
     return out_list
 
@@ -829,9 +792,8 @@ def preprocess_and_save_audio_from_ray_parallel(
 
 
 def process_audio_files_inference(filename, dirpath, mode):
-    audio_array, sample_rate = librosa.load(os.path.join(
-        dirpath, mode, filename
-    ), sr=16000)
+    path = os.path.join(dirpath, filename)
+    audio_array, sample_rate = librosa.load(path, sr=16000)
 
     trim_audio_array, index = librosa.effects.trim(audio_array)
     mel_spec_array = melspectrogram(
@@ -851,7 +813,7 @@ def process_audio_files_inference(filename, dirpath, mode):
 
 
 def preprocess_from_filenames(
-        filenames, mode, use_parallel=True
+    filenames, dirpath, mode, use_parallel=True
 ):
     if use_parallel:
         num_cores = multiprocessing.cpu_count()
@@ -878,7 +840,7 @@ def preprocess_from_ray_parallel_inference(
 ):
     filenames = os.listdir(os.path.join(dirpath, mode))
     return preprocess_from_filenames(
-        filenames=filenames, mode=mode,
+        filenames=filenames, dirpath=dirpath, mode=mode,
         use_parallel=use_parallel
     )
 
@@ -1053,7 +1015,7 @@ def random_truncate_array(batch_input):
     return batch_input
 
 
-class f1_score_callback(keras.callbacks.Callback):
+class f1_score_callback(object):
     def __init__(
         self, x_val_inp, y_val_inp, model_save_filename=None,
         save_model=True
@@ -1098,7 +1060,7 @@ class f1_score_callback(keras.callbacks.Callback):
         return
 
 
-class DataGenerator(keras.utils.Sequence):
+class DataGenerator(object):
     def __init__(
         self, x_set, y_set=None, sample_weights=None,
         batch_size=model_params['batch_size'], shuffle=False,
@@ -1150,549 +1112,3 @@ class DataGenerator(keras.utils.Sequence):
         result = self.__getitem__(self.n)
         self.n += 1
         return result
-
-
-def customPooling(x):
-    target = x[1]
-    inputs = x[0]
-    maskVal = 0
-    # getting the mask by observing the model's inputs
-    mask = K.equal(inputs, maskVal)
-    mask = K.all(mask, axis=-1, keepdims=True)
-
-    # inverting the mask for getting the valid steps for each sample
-    mask = 1 - K.cast(mask, K.floatx())
-
-    # summing the valid steps for each sample
-    stepsPerSample = K.sum(mask, axis=1, keepdims=False)
-
-    # applying the mask to the target
-    # (to make sure you are summing zeros below)
-    target = target * mask
-
-    # calculating the mean of the steps
-    # (using our sum of valid steps as averager)
-    means = K.sum(target, axis=1, keepdims=False) / stepsPerSample
-
-    return means
-
-
-def build_custom_convnet():
-    K.clear_session()
-    image_input = Input(
-        shape=(None, model_params['num_freq_bin']),
-        name='image_input'
-    )
-
-    num_conv_blocks = model_params['num_conv_blocks']
-    init_neurons = model_params['num_conv_filters']
-    spatial_dropout_fraction = model_params['spatial_dropout_fraction']
-    num_dense_layers = model_params['num_dense_layers']
-    num_dense_neurons = model_params['num_dense_neurons']
-    learning_rate = model_params['learning_rate']
-
-    convnet = []
-    convnet_5 = []
-    convnet_7 = []
-
-    for ly in range(0, num_conv_blocks):
-        if ly == 0:
-            convnet.append(Conv1D(
-                init_neurons, 3, strides=1, activation='linear',
-                padding='causal'
-            )(image_input))
-            convnet_5.append(Conv1D(
-                init_neurons, 5, strides=1, activation='linear',
-                padding='causal'
-            )(image_input))
-            convnet_7.append(Conv1D(
-                init_neurons, 7, strides=1, activation='linear',
-                padding='causal'
-            )(image_input))
-        else:
-            convnet.append(Conv1D(
-                init_neurons * (ly * 2), 3, strides=1,
-                activation='linear', padding='causal'
-            )(convnet[ly - 1]))
-            convnet_5.append(Conv1D(
-                init_neurons * (ly * 2), 5, strides=1,
-                activation='linear', padding='causal'
-            )(convnet_5[ly - 1]))
-            convnet_7.append(Conv1D(
-                init_neurons * (ly * 2), 7, strides=1,
-                activation='linear', padding='causal'
-            )(convnet_7[ly - 1]))
-
-        convnet[ly] = LeakyReLU()(convnet[ly])
-        convnet_5[ly] = LeakyReLU()(convnet_5[ly])
-        convnet_7[ly] = LeakyReLU()(convnet_7[ly])
-
-        if (
-            model_params['residual_con'] > 0 and
-            (ly - model_params['residual_con']) >= 0
-        ):
-            res_conv = Conv1D(
-                init_neurons * (ly * 2), 1, strides=1,
-                activation='linear', padding='same'
-            )(convnet[ly - model_params['residual_con']])
-            convnet[ly] = Add(
-                name=f'residual_con_3_{ly}'
-            )([convnet[ly], res_conv])
-
-            res_conv_5 = Conv1D(
-                init_neurons * (ly * 2), 1, strides=1,
-                activation='linear', padding='same'
-            )(convnet_5[ly - model_params['residual_con']])
-            convnet_5[ly] = Add(
-                name=f'residual_con_5_{ly}'
-            )([convnet_5[ly], res_conv_5])
-
-            res_conv_7 = Conv1D(
-                init_neurons * (ly * 2), 1, strides=1,
-                activation='linear', padding='same'
-            )(convnet_7[ly - model_params['residual_con']])
-            convnet_7[ly] = Add(
-                name=f'residual_con_7_{ly}'
-            )([convnet_7[ly], res_conv_7])
-
-        if ly < (num_conv_blocks - 1):
-            convnet[ly] = SpatialDropout1D(
-                spatial_dropout_fraction
-            )(convnet[ly])
-            convnet_5[ly] = SpatialDropout1D(
-                spatial_dropout_fraction
-            )(convnet_5[ly])
-            convnet_7[ly] = SpatialDropout1D(
-                spatial_dropout_fraction
-            )(convnet_7[ly])
-
-    dense = Lambda(lambda x: customPooling(x))(
-        [image_input, convnet[ly]]
-    )
-    dense_5 = Lambda(lambda x: customPooling(x))(
-        [image_input, convnet_5[ly]]
-    )
-    dense_7 = Lambda(lambda x: customPooling(x))(
-        [image_input, convnet_7[ly]]
-    )
-
-    dense = Concatenate()([dense, dense_5, dense_7])
-
-    for layers in range(num_dense_layers):
-        dense = Dense(num_dense_neurons, activation='linear')(dense)
-        dense = BatchNormalization()(dense)
-        dense = LeakyReLU()(dense)
-        dense = Dropout(model_params['dense_dropout'])(dense)
-
-    output_layer = Dense(1)(dense)
-    output_layer = Activation('sigmoid')(output_layer)
-    model = Model(inputs=image_input, outputs=output_layer)
-    opt = optimizers.Adam(lr=learning_rate)
-
-    try:
-        model = multi_gpu_model(model, gpus=4)
-    except:
-        pass
-
-    model.compile(
-        optimizer=opt, loss='binary_crossentropy',
-        metrics=['accuracy']
-    )
-
-    return model
-
-
-class Discriminator_Model(object):
-    def __init__(
-        self, load_pretrained=False, saved_model_name=None,
-        real_test_mode=False
-    ):
-        if not os.path.exists(model_params['model_save_dir']):
-            os.makedirs(model_params['model_save_dir'])
-
-        if not load_pretrained:
-            self.model = build_custom_convnet()
-            self.model.summary()
-        else:
-            self.model = load_model(
-                os.path.join(
-                    f"./{model_params['model_save_dir']}",
-                    saved_model_name
-                ), custom_objects={
-                    'customPooling': customPooling
-                }
-            )
-
-        info = '_'.join(str(v) for k, v in model_params.items())
-
-        self.model_name = f"saved_model_{info}.h5"
-        self.real_test_model_name = f"real_test_saved_model_{info}.h5"
-        self.model_save_filename = os.path.join(
-            f"./{model_params['model_save_dir']}", self.model_name
-        )
-        self.real_test_model_save_filename = os.path.join(
-            f"./{model_params['model_save_dir']}",
-            self.real_test_model_name
-        )
-
-        if real_test_mode:
-            if run_on_foundations:
-                self.real_test_data_dir = "/data/inference_data/"
-            else:
-                self.real_test_data_dir = "../data/inference_data/"
-
-            # preprocess the files
-            self.real_test_processed_data_real = preprocess_parallel(
-                self.real_test_data_dir, "real", use_parallel=True
-            )
-            self.real_test_processed_data_fake = preprocess_parallel(
-                self.real_test_data_dir, "fake", use_parallel=True
-            )
-
-            self.real_test_processed_data = (
-                self.real_test_processed_data_real +
-                self.real_test_processed_data_fake
-            )
-            self.real_test_processed_data = sorted(
-                self.real_test_processed_data, key=lambda x: len(x[0])
-            )
-            self.real_test_features = [
-                x[0] for x in self.real_test_processed_data
-            ]
-            self.real_test_labels = [
-                x[1] for x in self.real_test_processed_data
-            ]
-
-            print(
-                f"Length of real_test_processed_data:",
-                len(self.real_test_processed_data)
-            )
-
-        self.opt_threshold = None
-        self.optimum_threshold_filename = None
-
-    def train(self, xtrain, ytrain, xval, yval):
-        callbacks = []
-        tb = TensorBoard(
-            log_dir='tflogs', write_graph=True, write_grads=False
-        )
-        callbacks.append(tb)
-
-        try:
-            foundations.set_tensorboard_logdir('tflogs')
-        except:
-            print("foundations command not found")
-
-        es = EarlyStopping(
-            monitor='val_loss', mode='min', patience=5,
-            min_delta=0.0001, verbose=1
-        )
-        callbacks.append(tb)
-        callbacks.append(es)
-
-        rp = ReduceLROnPlateau(
-            monitor='val_loss', factor=0.6, patience=2,
-            verbose=1
-        )
-        callbacks.append(rp)
-
-        f1_callback = f1_score_callback(
-            xval, yval, model_save_filename=self.model_save_filename
-        )
-        callbacks.append(f1_callback)
-
-        class_weights = {1: 5, 0: 1}
-
-        train_generator = DataGenerator(xtrain, ytrain)
-        validation_generator = DataGenerator(xval, yval)
-        self.model.fit_generator(
-            train_generator,
-            steps_per_epoch=len(train_generator),
-            epochs=model_params['epochs'],
-            validation_data=validation_generator,
-            callbacks=callbacks,
-            shuffle=False,
-            use_multiprocessing=True,
-            verbose=1,
-            class_weight=class_weights
-        )
-
-        self.model = load_model(
-            self.model_save_filename,
-            custom_objects={'customPooling': customPooling}
-        )
-
-        try:
-            foundations.save_artifact(
-                self.model_save_filename, key='trained_model.h5'
-            )
-        except:
-            print("foundations command not found")
-
-    def inference_on_real_data(self, threshold=0.5):
-        datagen_val = DataGenerator(
-            self.real_test_features, mode='test', batch_size=1
-        )
-
-        y_pred = self.model.predict_generator(
-            datagen_val, use_multiprocessing=False, max_queue_size=50
-        )
-        y_pred_labels = np.zeros((len(y_pred)))
-        y_pred_labels[y_pred.flatten() > threshold] = 1
-        acc_score = accuracy_score(
-            self.real_test_labels, y_pred_labels
-        )
-
-        f1_score_val = f1_score(self.real_test_labels, y_pred_labels)
-        return acc_score, f1_score_val
-
-    @staticmethod
-    def get_labels_from_prob(y, threshold=0.5):
-        y_pred_labels = np.zeros((len(y)))
-        y = np.array(y)
-
-        if isinstance(threshold, list):
-            y_pred_labels[y.flatten() > threshold[0]] = 1
-        else:
-            y_pred_labels[y.flatten() > threshold] = 1
-        return y_pred_labels
-
-    def get_f1score_for_optimization(
-        self, threshold, y_true, y_pred, ismin=False
-    ):
-        y_pred_labels = self.get_labels_from_prob(
-            y_pred, threshold=threshold
-        )
-
-        if ismin:
-            return - f1_score(y_true, y_pred_labels)
-        else:
-            return f1_score(y_true, y_pred_labels)
-
-    def predict_labels(
-        self, x, threshold=0.5, raw_prob=False,
-        batch_size=model_params['batch_size']
-    ):
-        test_generator = DataGenerator(
-            x, mode='test', batch_size=batch_size
-        )
-        y_pred = self.model.predict_generator(
-            test_generator, steps=len(test_generator),
-            max_queue_size=10
-        )
-
-        print(y_pred)
-
-        if raw_prob:
-            return y_pred
-        else:
-            y_pred_labels = self.get_labels_from_prob(
-                y_pred, threshold=threshold
-            )
-            return y_pred_labels
-
-    def optimize_threshold(self, xtrain, ytrain, xval, yval):
-        ytrain_pred = self.predict_labels(xtrain, raw_prob=True)
-        yval_pred = self.predict_labels(xval, raw_prob=True)
-
-        self.opt_threshold = 0.5
-        ytrain_pred_labels = self.get_labels_from_prob(
-            ytrain_pred, threshold=self.opt_threshold
-        )
-        yval_pred_labels = self.get_labels_from_prob(
-            yval_pred, threshold=self.opt_threshold
-        )
-
-        train_f1_score = f1_score(ytrain_pred_labels, ytrain)
-        val_f1_score = f1_score(yval_pred_labels, yval)
-        print(
-            f"train f1 score: {train_f1_score}, " +
-            f"val f1 score: {val_f1_score}"
-        )
-
-        f1_train_partial = partial(
-            self.get_f1score_for_optimization,
-            y_true=ytrain.copy(), y_pred=ytrain_pred.copy(),
-            ismin=True
-        )
-        n_searches = 50
-        dim_0 = Real(low=0.2, high=0.8, name='dim_0')
-        dimensions = [dim_0]
-
-        search_result = gp_minimize(
-            func=f1_train_partial,
-            dimensions=dimensions,
-            acq_func='gp_hedge',  # Expected Improvement.
-            n_calls=n_searches,
-            # n_jobs=n_cpu,
-            verbose=False
-        )
-
-        self.opt_threshold = search_result.x
-
-        if isinstance(self.opt_threshold, list):
-            self.opt_threshold = self.opt_threshold[0]
-
-        info = '_'.join(str(v) for k, v in model_params.items())
-        self.optimum_threshold_filename = f"model_threshold_{info}.npy"
-
-        np.save(os.path.join(
-            f"{model_params['model_save_dir']}",
-            self.optimum_threshold_filename
-        ), self.opt_threshold)
-
-        train_f1_score = self.get_f1score_for_optimization(
-            self.opt_threshold, y_true=ytrain, y_pred=ytrain_pred
-        )
-        val_f1_score = self.get_f1score_for_optimization(
-            self.opt_threshold, y_true=yval, y_pred=yval_pred
-        )
-        print(
-            f"optimized train f1 score: {train_f1_score}, " +
-            f"optimized val f1 score: {val_f1_score}"
-        )
-
-    def evaluate(self, xtrain, ytrain, xval, yval, num_examples=1):
-        ytrain_pred = self.predict_labels(xtrain, raw_prob=True)
-        yval_pred = self.predict_labels(xval, raw_prob=True)
-
-        try:
-            info = '_'.join(str(v) for k, v in model_params.items())
-            self.optimum_threshold_filename = (
-                f"model_threshold_{info}.npy"
-            )
-
-            self.opt_threshold = np.load(os.path.join(
-                f"{model_params['model_save_dir']}",
-                self.optimum_threshold_filename
-            )).item()
-
-            print(f"loaded optimum threshold: {self.opt_threshold}")
-        except:
-            self.opt_threshold = 0.5
-
-        ytrain_pred_labels = self.get_labels_from_prob(
-            ytrain_pred, threshold=self.opt_threshold
-        )
-        yval_pred_labels = self.get_labels_from_prob(
-            yval_pred, threshold=self.opt_threshold
-        )
-
-        train_accuracy = accuracy_score(ytrain, ytrain_pred_labels)
-        val_accuracy = accuracy_score(yval, yval_pred_labels)
-
-        train_f1_score = f1_score(ytrain, ytrain_pred_labels)
-        val_f1_score = f1_score(yval, yval_pred_labels)
-
-        print(
-            f"train accuracy: {train_accuracy}, " +
-            f"train_f1_score: {train_f1_score},\n"
-            f"val accuracy: {val_accuracy}, " +
-            f"val_f1_score: {val_f1_score}"
-        )
-
-        try:
-            foundations.log_metric(
-                'train_accuracy', np.round(train_accuracy, 2)
-            )
-            foundations.log_metric(
-                'val_accuracy', np.round(val_accuracy, 2)
-            )
-            foundations.log_metric(
-                'train_f1_score', np.round(train_f1_score, 2)
-            )
-            foundations.log_metric(
-                'val_f1_score', np.round(val_f1_score, 2)
-            )
-            foundations.log_metric(
-                'optimum_threshold', np.round(self.opt_threshold, 2)
-            )
-        except Exception as e:
-            print(e)
-
-        # True Positive Example
-        ind_tp = np.argwhere(np.equal(
-            (yval_pred_labels + yval).astype(int), 2
-        )).reshape(-1, )
-
-        # True Negative Example
-        ind_tn = np.argwhere(np.equal(
-            (yval_pred_labels + yval).astype(int), 0
-        )).reshape(-1, )
-
-        # False Positive Example
-        ind_fp = np.argwhere(np.greater(
-            yval_pred_labels, yval
-        )).reshape(-1, )
-
-        # False Negative Example
-        ind_fn = np.argwhere(np.greater(
-            yval, yval_pred_labels
-        )).reshape(-1, )
-
-        path_to_save_spetrograms = './spectrograms'
-
-        if not os.path.isdir(path_to_save_spetrograms):
-            os.makedirs(path_to_save_spetrograms)
-
-        specs_saved = os.listdir(path_to_save_spetrograms)
-        if len(specs_saved) > 0:
-            for file_ in specs_saved:
-                os.remove(os.path.join(
-                    path_to_save_spetrograms, file_
-                ))
-
-        ind_random_tp = np.random.choice(
-            ind_tp, num_examples
-        ).reshape(-1, )
-        tp_x = [xtrain[i] for i in ind_random_tp]
-
-        ind_random_tn = np.random.choice(
-            ind_tn, num_examples
-        ).reshape(-1, )
-        tn_x = [xtrain[i] for i in ind_random_tn]
-
-        ind_random_fp = np.random.choice(
-            ind_fp, num_examples
-        ).reshape(-1, )
-        fp_x = [xtrain[i] for i in ind_random_fp]
-
-        ind_random_fn = np.random.choice(
-            ind_fn, num_examples
-        ).reshape(-1, )
-        fn_x = [xtrain[i] for i in ind_random_fn]
-
-        print(
-            "Plotting spectrograms to show what" +
-            " the hell the model has learned"
-        )
-
-        for i in range(num_examples):
-            plot_spectrogram(tp_x[i], path=os.path.join(
-                path_to_save_spetrograms, f'true_positive_{i}.png'
-            ))
-            plot_spectrogram(tn_x[i], path=os.path.join(
-                path_to_save_spetrograms, f'true_negative_{i}.png'
-            ))
-            plot_spectrogram(fp_x[i], path=os.path.join(
-                path_to_save_spetrograms, f'false_positive_{i}.png'
-            ))
-            plot_spectrogram(fn_x[i], path=os.path.join(
-                path_to_save_spetrograms, f'fale_negative_{i}.png'
-            ))
-        try:
-            foundations.save_artifact(os.path.join(
-                path_to_save_spetrograms, f'true_positive_{i}.png'
-            ), key='true_positive_example')
-            foundations.save_artifact(os.path.join(
-                path_to_save_spetrograms, f'true_negative_{i}.png'
-            ), key='true_negative_example')
-            foundations.save_artifact(os.path.join(
-                path_to_save_spetrograms, f'false_positive_{i}.png'
-            ), key='false_positive_example')
-            foundations.save_artifact(os.path.join(
-                path_to_save_spetrograms, f'fale_negative_{i}.png'
-            ), key='false_negative_example')
-
-        except Exception as e:
-            print(e)

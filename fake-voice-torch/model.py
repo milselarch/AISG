@@ -37,6 +37,7 @@ class Discriminator(nn.Module):
         self.num_conv_blocks = num_conv_blocks
         self.residual_con = residual_con
         self.dense_dropout = dense_dropout
+        self.num_dense_layers = num_dense_layers
 
         self.convnet_3_layers = {}
         self.convnet_5_layers = {}
@@ -64,7 +65,7 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError
 
-                if layer == 0:
+                if layer_no == 0:
                     outputs = init_neurons
                 else:
                     outputs = init_neurons * (layer_no * 2)
@@ -79,6 +80,9 @@ class Discriminator(nn.Module):
                     nn.LeakyReLU(negative_slope=0.3)
                 )
 
+                print(f'CONV LAYER {layer_no} {kernel}')
+                print(convnet_layer)
+
                 if residual_con > 0 and (layer_no - residual_con) >= 0:
                     res_convnet_layer = nn.Conv1d(
                         in_channels=num_freq_bin,
@@ -92,7 +96,7 @@ class Discriminator(nn.Module):
                 res_convnet_layers[layer_no] = res_convnet_layer
 
         for layer_no in range(self.num_dense_layers):
-            dense_net = nn.Sequential([
+            dense_net = nn.Sequential(
                 nn.Linear(outputs, num_dense_neurons),
                 nn.BatchNorm2d(
                     num_features=num_dense_neurons,
@@ -100,7 +104,7 @@ class Discriminator(nn.Module):
                 ),
                 nn.LeakyReLU(negative_slope=0.3),
                 nn.Dropout(p=dense_dropout)
-            ])
+            )
 
             self.dense_net_layers.append(dense_net)
 
@@ -113,9 +117,12 @@ class Discriminator(nn.Module):
         conv_dense_layers = []
 
         for kernel in (3, 5, 7):
+            print(f'KERNEL {kernel}')
             conv_output = image_inputs
 
             for layer_no in range(self.num_conv_blocks):
+                print(f'LAYER NO {layer_no}')
+
                 if kernel == 3:
                     convnet_layers = self.convnet_3_layers
                     res_convnet_layers = self.res_convnet_3_layers
@@ -130,6 +137,7 @@ class Discriminator(nn.Module):
 
                 convnet_layer = convnet_layers[layer_no]
                 res_convnet_layer = res_convnet_layers[layer_no]
+                print(f'CONVNET LAYER {convnet_layer}')
                 sub_conv_output = convnet_layer(conv_output)
 
                 if res_convnet_layer is not None:
