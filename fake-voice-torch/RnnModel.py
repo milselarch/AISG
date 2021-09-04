@@ -31,13 +31,18 @@ class Discriminator(nn.Module):
     def __init__(
         self, num_freq_bin, init_neurons, num_conv_blocks,
         residual_con, num_dense_neurons, dense_dropout,
-        num_dense_layers
+        num_dense_layers, hidden_size=None, rnn_layers=1
     ):
+        if hidden_size is None:
+            hidden_size = num_dense_neurons
+
         super().__init__()
         self.num_conv_blocks = num_conv_blocks
         self.residual_con = residual_con
         self.dense_dropout = dense_dropout
         self.num_dense_layers = num_dense_layers
+        self.hidden_size = hidden_size
+        self.rnn_layers = rnn_layers
 
         self.convnet_3_layers = {}
         self.convnet_5_layers = {}
@@ -122,8 +127,13 @@ class Discriminator(nn.Module):
 
             self.dense_net_layers.append(dense_net)
 
+        self.rnn = nn.RNN(
+            num_dense_neurons, self.hidden_size,
+            self.rnn_layers, batch_first=True
+        )
+
         self.final_dense = nn.Linear(
-            num_dense_neurons, out_features=1
+            self.hidden_size, out_features=1
         )
 
     def test(self, image_inputs, kernel=3):
@@ -163,7 +173,7 @@ class Discriminator(nn.Module):
         # print(image_inputs.shape, conv_output.shape)
         return conv_output
 
-    def forward(self, image_inputs):
+    def conv_series(self, image_inputs):
         conv_values = {}
         conv_dense_layers = []
 
@@ -208,19 +218,46 @@ class Discriminator(nn.Module):
             conv_dense_layers.append(conv_dense)
             conv_values[kernel] = conv_dense
 
-        shapes = [ly.shape for ly in conv_dense_layers]
-        # print(f'PRE-CAT SHAPES {shapes}')
         dense_val = torch.cat(conv_dense_layers, dim=-1)
-        # print(f'DENSE {dense_val.shape}')
 
         for layer_no in range(self.num_dense_layers):
             dense_layer = self.dense_net_layers[layer_no]
             dense_val = dense_layer(dense_val)
             # print(f'DENSE VAL {layer_no} {dense_val.shape}')
 
-        final_dense_val = self.final_dense(dense_val)
+        return dense_val
+
+    def rnn_test(self, batch_image_inputs):
+        batch_outputs = []
+
+        for image_inputs in batch_image_inputs:
+            outputs = self.conv_series(image_inputs)
+            batch_outputs.append(outputs.unsqueeze(0))
+
+        torch_batch_outputs = torch.vstack(batch_outputs)
+
+        shapes = [t.shape for t in batch_outputs]
+        print(f'SHAPES {shapes}')
+        print(f'BATCH-O {torch_batch_outputs.shape}')
+
+        rnn_output, hidden_states = self.rnn(torch_batch_outputs)
+        return rnn_output, hidden_states
+
+    def forward(self, batch_image_inputs):
+        batch_outputs = []
+
+        for image_inputs in batch_image_inputs:
+            outputs = self.conv_series(image_inputs)
+            batch_outputs.append(outputs.unsqueeze(0))
+
+        torch_batch_outputs = torch.vstack(batch_outputs)
+        rnn_output, hidden_states = self.rnn(torch_batch_outputs)
+        # print('RNN OUTPUT', rnn_output)
+
+        rnn_last_slice = rnn_output[:, -1, :]
+        final_dense_val = self.final_dense(rnn_last_slice)
         final_val = torch.sigmoid(final_dense_val)
-        return final_val
+        return final_val, hidden_states
 
     @classmethod
     def causal_conv_1d(
