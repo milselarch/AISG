@@ -9,13 +9,13 @@ def custom_pooling(x):
     # getting the mask by observing the model's inputs
     mask = torch.eq(inputs, mask_value)
     # mask = K.all(mask, axis=-1, keepdims=True)
-    mask = torch.all(mask, dim=-1, keepdim=True)
+    mask = torch.all(mask, dim=-2, keepdim=True)
 
     # inverting the mask for getting the valid steps for each sample
     mask = 1 - mask.float()
 
     # summing the valid steps for each sample
-    steps_per_sample = torch.sum(mask, dim=1, keepdim=False)
+    steps_per_sample = torch.sum(mask, dim=2, keepdim=False)
 
     # applying the mask to the target
     # (to make sure you are summing zeros below)
@@ -23,7 +23,7 @@ def custom_pooling(x):
 
     # calculating the mean of the steps
     # (using our sum of valid steps as averager)
-    total = torch.sum(target, dim=1, keepdim=False)
+    total = torch.sum(target, dim=2, keepdim=False)
     means = total / steps_per_sample
     return means
 
@@ -48,11 +48,20 @@ class Discriminator(nn.Module):
         self.res_convnet_7_layers = {}
 
         self.dense_net_layers = []
+        self.kernels = (3, 5, 7)
+        self.neg_slope = 0.01
 
-        outputs = init_neurons
+        prev_outputs = num_freq_bin
 
-        for layer_no in range(num_conv_blocks):
-            for kernel in (3, 5, 7):
+        for kernel in self.kernels:
+            prev_outputs = num_freq_bin
+
+            for layer_no in range(num_conv_blocks):
+                if layer_no == 0:
+                    outputs = init_neurons
+                else:
+                    outputs = init_neurons * (layer_no * 2)
+
                 if kernel == 3:
                     convnet_layers = self.convnet_3_layers
                     res_convnet_layers = self.res_convnet_3_layers
@@ -65,44 +74,49 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError
 
-                if layer_no == 0:
-                    outputs = init_neurons
-                else:
-                    outputs = init_neurons * (layer_no * 2)
-
                 convnet_layer = nn.Sequential(
                     self.causal_conv_1d(
-                        in_channels=num_freq_bin,
+                        in_channels=prev_outputs,
                         kernel_size=kernel,
                         stride=1, out_channels=outputs
                     ),
-                    nn.Linear(outputs, outputs),
-                    nn.LeakyReLU(negative_slope=0.3)
+                    nn.Linear(kernel, 1),
+                    nn.LeakyReLU(negative_slope=self.neg_slope)
                 )
 
+                convnet_layers[layer_no] = convnet_layer
                 print(f'CONV LAYER {layer_no} {kernel}')
                 print(convnet_layer)
 
                 if residual_con > 0 and (layer_no - residual_con) >= 0:
-                    res_convnet_layer = nn.Conv1d(
-                        in_channels=num_freq_bin,
-                        stride=1, kernel_size=1,
-                        out_channels=outputs
+                    res_convnet_layer = nn.Sequential(
+                        nn.Conv1d(
+                            in_channels=prev_outputs, stride=1,
+                            kernel_size=1, out_channels=outputs
+                        ),
+                        nn.Linear(1, 1)
                     )
+                    print(f'RES CONV LAYER {layer_no} {kernel}')
+                    print(res_convnet_layer)
                 else:
                     res_convnet_layer = None
 
-                convnet_layers[layer_no] = convnet_layer
                 res_convnet_layers[layer_no] = res_convnet_layer
+                prev_outputs = outputs
 
         for layer_no in range(self.num_dense_layers):
+            if layer_no == 0:
+                input_neurons = prev_outputs * len(self.kernels)
+            else:
+                input_neurons = num_dense_neurons
+
             dense_net = nn.Sequential(
-                nn.Linear(outputs, num_dense_neurons),
-                nn.BatchNorm2d(
+                nn.Linear(input_neurons, num_dense_neurons),
+                nn.BatchNorm1d(
                     num_features=num_dense_neurons,
                     momentum=0.99, eps=0.001
                 ),
-                nn.LeakyReLU(negative_slope=0.3),
+                nn.LeakyReLU(negative_slope=self.neg_slope),
                 nn.Dropout(p=dense_dropout)
             )
 
@@ -111,6 +125,43 @@ class Discriminator(nn.Module):
         self.final_dense = nn.Linear(
             num_dense_neurons, out_features=1
         )
+
+    def test(self, image_inputs, kernel=3):
+        conv_output = image_inputs
+
+        for layer_no in range(self.num_conv_blocks):
+            print(f'LAYER NO {layer_no}')
+
+            if kernel == 3:
+                convnet_layers = self.convnet_3_layers
+                res_convnet_layers = self.res_convnet_3_layers
+            elif kernel == 5:
+                convnet_layers = self.convnet_5_layers
+                res_convnet_layers = self.res_convnet_5_layers
+            elif kernel == 7:
+                convnet_layers = self.convnet_7_layers
+                res_convnet_layers = self.res_convnet_7_layers
+            else:
+                raise ValueError
+
+            convnet_layer = convnet_layers[layer_no]
+            res_convnet_layer = res_convnet_layers[layer_no]
+            print(f'CONVNET LAYER {convnet_layer}')
+            sub_conv_output = convnet_layer(conv_output)
+            print(f'CONV SHAPE {sub_conv_output.shape}')
+
+            if res_convnet_layer is not None:
+                print(f'RES CONVNET LAYER {res_convnet_layer}')
+                res_conv_output = res_convnet_layer(conv_output)
+                print(f'RES CONV SHAPE {res_conv_output.shape}')
+                conv_output = sub_conv_output.add(res_conv_output)
+                print(f'CONV ADD SHAPE {conv_output.shape}')
+            else:
+                conv_output = sub_conv_output
+
+        print('POOL SHAPES')
+        print(image_inputs.shape, conv_output.shape)
+        return conv_output
 
     def forward(self, image_inputs):
         conv_values = {}
@@ -139,27 +190,36 @@ class Discriminator(nn.Module):
                 res_convnet_layer = res_convnet_layers[layer_no]
                 print(f'CONVNET LAYER {convnet_layer}')
                 sub_conv_output = convnet_layer(conv_output)
+                print(f'CONV SHAPE {sub_conv_output.shape}')
 
                 if res_convnet_layer is not None:
+                    print(f'RES CONVNET LAYER {res_convnet_layer}')
                     res_conv_output = res_convnet_layer(conv_output)
-                    conv_output = torch.add(
-                        conv_output, res_conv_output
-                    )
+                    print(f'RES CONV SHAPE {res_conv_output.shape}')
+                    conv_output = sub_conv_output.add(res_conv_output)
+                    print(f'CONV ADD SHAPE {conv_output.shape}')
                 else:
                     conv_output = sub_conv_output
 
+            print('POOL SHAPES')
+            print(image_inputs.shape, conv_output.shape)
             conv_dense = custom_pooling([image_inputs, conv_output])
+            print('CONV DENSE', conv_dense.shape)
             conv_dense_layers.append(conv_dense)
             conv_values[kernel] = conv_dense
 
+        shapes = [ly.shape for ly in conv_dense_layers]
+        print(f'PRE-CAT SHAPES {shapes}')
         dense_val = torch.cat(conv_dense_layers, dim=-1)
+        print(f'DENSE {dense_val.shape}')
 
         for layer_no in range(self.num_dense_layers):
             dense_layer = self.dense_net_layers[layer_no]
             dense_val = dense_layer(dense_val)
+            print(f'DENSE VAL {layer_no} {dense_val.shape}')
 
         final_dense_val = self.final_dense(dense_val)
-        final_val = nn.sigmoid(final_dense_val)
+        final_val = torch.sigmoid(final_dense_val)
         return final_val
 
     @classmethod
@@ -170,8 +230,9 @@ class Discriminator(nn.Module):
         pad = (kernel_size - 1) * dilation
 
         return nn.Conv1d(
-            in_channels, out_channels, kernel_size,
-            padding=pad, dilation=dilation, **kwargs
+            in_channels=in_channels, out_channels=out_channels,
+            kernel_size=kernel_size, padding=pad, dilation=dilation,
+            **kwargs
         )
 
 

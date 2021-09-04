@@ -40,7 +40,7 @@ rescale = 1 / scale_down
 
 output_path = f'../stats/detections-{stamp}.csv'
 profile_path = f'../stats/extract-{stamp}.profile'
-base_filename = "face_map_stats-4-20-20210830-020048.csv"
+base_filename = "face_map_stats-4-20-20210902-164550.csv"
 base_faces = pd.read_csv(f'../stats/{base_filename}')
 base_faces['prediction'] = None
 
@@ -81,12 +81,12 @@ def run():
             base_faces['filename'] == filename
         ]
 
-        print('FRAME ROWS', video_frame_rows)
+        # print('FRAME ROWS', video_frame_rows)
         # print('FRAMES', frames_column)
         # print(240 in frames_column)
 
         for i in range(num_frames):
-            print(f'FRAME NO {i} {np_frames.shape}')
+            #  print(f'FRAME NO {i} {np_frames.shape}')
             frame_no = every_n_frames * i
             frane = np_frames[i]
             face_rows = video_frame_rows[
@@ -124,6 +124,7 @@ def run():
                 prediction = predictions[0][1]
                 pred_column = base_faces['prediction']
                 pred_column[index] = prediction
+                # print(f'PREDICTION {prediction}')
                 # print(base_faces.loc[index])
                 # input('>>> ')
 
