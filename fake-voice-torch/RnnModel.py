@@ -44,6 +44,7 @@ class Discriminator(nn.Module):
         self.hidden_size = hidden_size
         self.rnn_layers = rnn_layers
 
+        self.markers = []
         self.convnet_3_layers = {}
         self.convnet_5_layers = {}
         self.convnet_7_layers = {}
@@ -56,6 +57,7 @@ class Discriminator(nn.Module):
         self.kernels = (3, 5, 7)
         self.neg_slope = 0.01
 
+        mark = self.mark
         prev_outputs = num_freq_bin
 
         for kernel in self.kernels:
@@ -79,7 +81,7 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError
 
-                convnet_layer = nn.Sequential(
+                convnet_layer = mark(nn.Sequential(
                     self.causal_conv_1d(
                         in_channels=prev_outputs,
                         kernel_size=kernel,
@@ -87,20 +89,20 @@ class Discriminator(nn.Module):
                     ),
                     nn.Linear(kernel, 1),
                     nn.LeakyReLU(negative_slope=self.neg_slope)
-                )
+                ))
 
                 convnet_layers[layer_no] = convnet_layer
                 # print(f'CONV LAYER {layer_no} {kernel}')
                 # print(convnet_layer)
 
                 if residual_con > 0 and (layer_no - residual_con) >= 0:
-                    res_convnet_layer = nn.Sequential(
+                    res_convnet_layer = mark(nn.Sequential(
                         nn.Conv1d(
                             in_channels=prev_outputs, stride=1,
                             kernel_size=1, out_channels=outputs
                         ),
                         nn.Linear(1, 1)
-                    )
+                    ))
                     # print(f'RES CONV LAYER {layer_no} {kernel}')
                     # print(res_convnet_layer)
                 else:
@@ -115,7 +117,7 @@ class Discriminator(nn.Module):
             else:
                 input_neurons = num_dense_neurons
 
-            dense_net = nn.Sequential(
+            dense_net = mark(nn.Sequential(
                 nn.Linear(input_neurons, num_dense_neurons),
                 nn.BatchNorm1d(
                     num_features=num_dense_neurons,
@@ -123,18 +125,29 @@ class Discriminator(nn.Module):
                 ),
                 nn.LeakyReLU(negative_slope=self.neg_slope),
                 nn.Dropout(p=dense_dropout)
-            )
+            ))
 
             self.dense_net_layers.append(dense_net)
 
-        self.rnn = nn.RNN(
+        self.rnn = mark(nn.LSTM(
             num_dense_neurons, self.hidden_size,
             self.rnn_layers, batch_first=True
-        )
+        ))
 
-        self.final_dense = nn.Linear(
+        self.final_dense = mark(nn.Linear(
             self.hidden_size, out_features=1
-        )
+        ))
+
+    def to_cuda(self):
+        super().cuda()
+        for tensor in self.markers:
+            # assert isinstance(tensor, torch.Tensor)
+            tensor.cuda()
+
+    def mark(self, tensor):
+        # assert isinstance(tensor, torch.Tensor)
+        self.markers.append(tensor)
+        return tensor
 
     def test(self, image_inputs, kernel=3):
         conv_output = image_inputs
