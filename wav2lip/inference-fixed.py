@@ -10,60 +10,39 @@ import platform
 
 from pdb import set_trace as bp
 
+# e98ff9de751839a9.mp4
+
 SET_BP = False
 
 def set_breakpoint():
     if SET_BP:
         bp()
 
+class obs(object):
+    def __init__(self):
+        self.checkpoint_path = 'pretrained/wav2lip.pth'
+        self.outfile = 'results/result_voice.mp4'
+        self.static = False
 
-parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
+        self.fps = 25
+        self.pads = [0, 10, 0, 0]
+        self.face_det_batch_size = 16
+        self.wav2lip_batch_size = 128
+        self.resize_factor = 1
 
-parser.add_argument('--checkpoint_path', type=str,
-                    help='Name of saved checkpoint to load weights from', required=True)
+        self.crop = [0, -1, 0, -1]
+        self.box = [-1, -1, -1, -1]
+        self.rotate = False
 
-parser.add_argument('--face', type=str,
-                    help='Filepath of video/image that contains faces to use', required=True)
-parser.add_argument('--audio', type=str,
-                    help='Filepath of video/audio file to use as raw audio source', required=True)
-parser.add_argument('--outfile', type=str, help='Video path to save result. See default for an e.g.',
-                    default='results/result_voice.mp4')
+        self.nosmooth = False
+        # self.face = '../datasets/train/videos/fd1404019e28214f.mp4'
+        # self.audio = '../datasets/train/videos/0b37e062f7751dac.mp4'
+        self.face = 'results/fd1404019e28214f.mp4'
+        self.audio = 'results/0b37e062f7751dac.mp4'
+        self.img_size = 96
 
-parser.add_argument('--static', type=bool,
-                    help='If True, then use only first video frame for inference', default=False)
-parser.add_argument('--fps', type=float, help='Can be specified only if input is a static image (default: 25)',
-                    default=25., required=False)
 
-parser.add_argument('--pads', nargs='+', type=int, default=[0, 10, 0, 0],
-                    help='Padding (top, bottom, left, right). Please adjust to include chin at least')
-
-parser.add_argument('--face_det_batch_size', type=int,
-                    help='Batch size for face detection', default=16)
-parser.add_argument('--wav2lip_batch_size', type=int, help='Batch size for Wav2Lip model(s)', default=128)
-
-parser.add_argument('--resize_factor', default=1, type=int,
-                    help='Reduce the resolution by this factor. Sometimes, best results are obtained at 480p or 720p')
-
-parser.add_argument('--crop', nargs='+', type=int, default=[0, -1, 0, -1],
-                    help='Crop video to a smaller region (top, bottom, left, right). Applied after resize_factor and rotate arg. '
-                         'Useful if multiple face present. -1 implies the value will be auto-inferred based on height, width')
-
-parser.add_argument('--box', nargs='+', type=int, default=[-1, -1, -1, -1],
-                    help='Specify a constant bounding box for the face. Use only as a last resort if the face is not detected.'
-                         'Also, might work only if the face is not moving around much. Syntax: (top, bottom, left, right).')
-
-parser.add_argument('--rotate', default=False, action='store_true',
-                    help='Sometimes videos taken from a phone can be flipped 90deg. If true, will flip video right by 90deg.'
-                         'Use if you get a flipped result, despite feeding a normal looking video')
-
-parser.add_argument('--nosmooth', default=False, action='store_true',
-                    help='Prevent smoothing face detections over a short temporal window')
-
-args = parser.parse_args()
-args.img_size = 96
-
-print(args)
-# input('>>> ')
+args = obs()
 
 if os.path.isfile(args.face) and args.face.split('.')[1] in ['jpg', 'png', 'jpeg']:
     args.static = True
@@ -72,14 +51,16 @@ device = 'cuda'
 # device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('Using {} for inference.'.format(device))
 
+
 def get_smoothened_boxes(boxes, T):
     for i in range(len(boxes)):
         if i + T > len(boxes):
             window = boxes[len(boxes) - T:]
         else:
-            window = boxes[i : i + T]
+            window = boxes[i: i + T]
         boxes[i] = np.mean(window, axis=0)
     return boxes
+
 
 def face_detect(images):
     detector = face_detection.FaceAlignment(
@@ -144,6 +125,7 @@ def face_detect(images):
     del detector
     return results
 
+
 def datagen(frames, mels):
     img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
 
@@ -151,7 +133,7 @@ def datagen(frames, mels):
         if not args.static:
             set_breakpoint()
             print('FACE DETECT')
-            face_det_results = face_detect(frames) # BGR2RGB for CNN face detection
+            face_det_results = face_detect(frames)  # BGR2RGB for CNN face detection
             set_breakpoint()
         else:
             face_det_results = face_detect([frames[0]])
@@ -161,7 +143,8 @@ def datagen(frames, mels):
         face_det_results = [[f[y1: y2, x1:x2], (y1, y2, x1, x2)] for f in frames]
 
     for i, m in enumerate(mels):
-        idx = 0 if args.static else i%len(frames)
+        print(f'ENUM {i, m}')
+        idx = 0 if args.static else i % len(frames)
         frame_to_save = frames[idx].copy()
         face, coords = face_det_results[idx].copy()
 
@@ -176,7 +159,7 @@ def datagen(frames, mels):
             img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
 
             img_masked = img_batch.copy()
-            img_masked[:, args.img_size//2:] = 0
+            img_masked[:, args.img_size // 2:] = 0
 
             img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
             mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
@@ -188,14 +171,16 @@ def datagen(frames, mels):
         img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
 
         img_masked = img_batch.copy()
-        img_masked[:, args.img_size//2:] = 0
+        img_masked[:, args.img_size // 2:] = 0
 
         img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
         mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
         yield img_batch, mel_batch, frame_batch, coords_batch
 
+
 mel_step_size = 16
+
 
 def _load(checkpoint_path):
     if device == 'cuda':
@@ -205,6 +190,7 @@ def _load(checkpoint_path):
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
+
 def load_model(path):
     model = Wav2Lip()
     print("Load checkpoint from: {}".format(path))
@@ -213,10 +199,12 @@ def load_model(path):
     new_s = {}
     for k, v in s.items():
         new_s[k.replace('module.', '')] = v
+
     model.load_state_dict(new_s)
 
     model = model.to(device)
     return model.eval()
+
 
 def main():
     if not os.path.isfile(args.face):
@@ -239,7 +227,7 @@ def main():
                 video_stream.release()
                 break
             if args.resize_factor > 1:
-                frame = cv2.resize(frame, (frame.shape[1]//args.resize_factor, frame.shape[0]//args.resize_factor))
+                frame = cv2.resize(frame, (frame.shape[1] // args.resize_factor, frame.shape[0] // args.resize_factor))
 
             if args.rotate:
                 frame = cv2.rotate(frame, cv2.cv2.ROTATE_90_CLOCKWISE)
@@ -252,7 +240,7 @@ def main():
 
             full_frames.append(frame)
 
-    print ("Number of frames available for inference: "+str(len(full_frames)))
+    print("Number of frames available for inference: " + str(len(full_frames)))
 
     if not args.audio.endswith('.wav'):
         print('Extracting raw audio...')
@@ -269,7 +257,7 @@ def main():
         raise ValueError('Mel contains nan! Using a TTS voice? Add a small epsilon noise to the wav file and try again')
 
     mel_chunks = []
-    mel_idx_multiplier = 80./fps
+    mel_idx_multiplier = 80. / fps
     i = 0
 
     while 1:
@@ -278,7 +266,7 @@ def main():
             mel_chunks.append(mel[:, len(mel[0]) - mel_step_size:])
             break
 
-        mel_chunks.append(mel[:, start_idx : start_idx + mel_step_size])
+        mel_chunks.append(mel[:, start_idx: start_idx + mel_step_size])
         i += 1
 
     print("Length of mel chunks: {}".format(len(mel_chunks)))
@@ -288,18 +276,26 @@ def main():
     batch_size = args.wav2lip_batch_size
     gen = datagen(full_frames.copy(), mel_chunks)
 
-    for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen,
-                                                                    total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
+    total = int(np.ceil(float(len(mel_chunks)) / batch_size))
+    pbar = tqdm(gen, total=total)
+
+    for i, (img_batch, mel_batch, frames, coords) in enumerate(pbar):
+        print(f'STEP {i}/{total}')
+
         if i == 0:
             model = load_model(args.checkpoint_path)
-            print ("Model loaded")
+            print("Model loaded")
 
             frame_h, frame_w = full_frames[0].shape[:-1]
-            out = cv2.VideoWriter('temp/result.avi',
-                                  cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
+            out = cv2.VideoWriter(
+                'temp/result.avi', cv2.VideoWriter_fourcc(*'DIVX'),
+                fps, (frame_w, frame_h)
+            )
 
-        img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
-        mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(device)
+        np_img_batch = np.transpose(img_batch, (0, 3, 1, 2))
+        np_mel_batch = np.transpose(mel_batch, (0, 3, 1, 2))
+        img_batch = torch.FloatTensor(np_img_batch).to(device)
+        mel_batch = torch.FloatTensor(np_mel_batch).to(device)
 
         with torch.no_grad():
             pred = model(mel_batch, img_batch)

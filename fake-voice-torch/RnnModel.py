@@ -31,7 +31,8 @@ class Discriminator(nn.Module):
     def __init__(
         self, num_freq_bin, init_neurons, num_conv_blocks,
         residual_con, num_dense_neurons, dense_dropout,
-        num_dense_layers, hidden_size=None, rnn_layers=1
+        num_dense_layers, hidden_size=None, rnn_layers=1,
+        final_only=False
     ):
         if hidden_size is None:
             hidden_size = num_dense_neurons
@@ -43,6 +44,8 @@ class Discriminator(nn.Module):
         self.num_dense_layers = num_dense_layers
         self.hidden_size = hidden_size
         self.rnn_layers = rnn_layers
+
+        self.final_only = final_only
 
         self.markers = []
         self.convnet_3_layers = {}
@@ -256,7 +259,7 @@ class Discriminator(nn.Module):
         rnn_output, hidden_states = self.rnn(torch_batch_outputs)
         return rnn_output, hidden_states
 
-    def forward(self, batch_image_inputs):
+    def forward(self, batch_image_inputs, sigmoid=True):
         batch_outputs = []
 
         for image_inputs in batch_image_inputs:
@@ -267,9 +270,13 @@ class Discriminator(nn.Module):
         rnn_output, hidden_states = self.rnn(torch_batch_outputs)
         # print('RNN OUTPUT', rnn_output)
 
-        rnn_last_slice = rnn_output[:, -1, :]
-        final_dense_val = self.final_dense(rnn_last_slice)
-        final_val = torch.sigmoid(final_dense_val)
+        if self.final_only:
+            rnn_output = rnn_output[:, -1, :]
+
+        final_val = self.final_dense(rnn_output)
+        if sigmoid:
+            final_val = torch.sigmoid(final_val)
+
         return final_val, hidden_states
 
     @classmethod

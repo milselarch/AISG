@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-import model
+import RnnModel
 import torch.nn as nn
 import tensorflow as tf
 import torch.optim as optim
@@ -17,15 +17,15 @@ from constants import model_params, base_data_path
 from datetime import datetime as Datetime
 from tqdm.auto import tqdm
 
-torch.cuda.set_per_process_memory_fraction(0.5, 0)
-torch.cuda.empty_cache()
-
 def round_sig(x, sig=2):
+    if x == 0:
+        return 0
+
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
 
 class Trainer(object):
     def __init__(
-        self, seed=42, test_p=0.05, use_cuda=True,
+        self, seed=42, test_p=0.2, use_cuda=True,
         valid_p=0.05
     ):
         self.tensorboard_started = False
@@ -46,11 +46,13 @@ class Trainer(object):
 
         self.model = self.make_model()
         self.dirpath = '../dessa-fake-voice/DS_10283_3336/LA/'
+        self.lr = 0.001
 
-        self.criterion = nn.BCELoss()
-        self.optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=utils.model_params['learning_rate']
+        print(f'USING LEARNING RATE {self.lr}')
+
+        self.criterion = nn.BCEWithLogitsLoss()
+        self.optimizer = optim.RMSprop(
+            self.model.parameters(), lr=self.lr
         )
 
         if self.use_cuda and torch.cuda.is_available():
@@ -180,7 +182,7 @@ class Trainer(object):
                 )
 
                 self.accum_train(score, self.perf_decay)
-                
+
             pbar.set_description(desc)
             pbar.update(batch_size)
             episode_no += batch_size
@@ -208,21 +210,69 @@ class Trainer(object):
         print(f'time taken: {round(time_taken, 2)}s')
         print(f'time per eps: {round(time_per_episode, 3)}s')
 
-    @staticmethod
-    def get_smooth_score(accum_score, decay, eps):
-        denom = (1 - decay ** eps) / (1 - decay)
-        score = accum_score / denom
+    def batch_validate(
+        self, episode_no, batch_size=16, fake_p=0.5,
+        target_lengths=(128, 1024)
+    ):
+        batch_x, np_labels = self.prepare_batch(
+            batch_size=batch_size, fake_p=fake_p,
+            target_lengths=target_lengths,
+            is_training=False
+        )
+
+        torch_batch_x = torch.tensor(batch_x).to(self.device)
+        torch_labels = torch.tensor(np_labels).float()
+        torch_labels = torch_labels.to(self.device).detach()
+        self.model.train(False)
+
+        with torch.no_grad():
+            raw_preds, h0 = self.model(torch_batch_x, sigmoid=False)
+            loss = self.criterion(raw_preds, torch_labels)
+            loss_value = loss.item()
+
+        self.model.train(True)
+        preds = torch.sigmoid(raw_preds)
+        np_preds = preds.cpu().detach().numpy().flatten()
+        flat_labels = np_labels.flatten()
+        score = self.record_metrics(
+            episode_no, loss_value, np_preds, flat_labels,
+            callback=self.record_validate_errors
+        )
+
         return score
 
-    def accum_train(self, reward, decay):
-        self.accum_train_score += reward
-        self.accum_train_score *= decay
-        return self.accum_train_score
+    def batch_train(
+        self, episode_no, batch_size=16, fake_p=0.5,
+        target_lengths=(128, 1024), record=False
+    ):
+        batch_x, np_labels = self.prepare_batch(
+            batch_size=batch_size, fake_p=fake_p,
+            target_lengths=target_lengths,
+            is_training=True
+        )
 
-    def accum_validate(self, reward, decay):
-        self.accum_validate_score += reward
-        self.accum_validate_score *= decay
-        return self.accum_validate_score
+        torch_batch_x = torch.tensor(batch_x).to(self.device)
+        torch_labels = torch.tensor(np_labels).float()
+        torch_labels = torch_labels.to(self.device).detach()
+        raw_preds, h0 = self.model(torch_batch_x, sigmoid=False)
+
+        self.optimizer.zero_grad()
+        loss = self.criterion(raw_preds, torch_labels)
+        loss_value = loss.item()
+        loss.backward()
+        self.optimizer.step()
+
+        callback = self.record_train_errors if record else None
+        preds = torch.sigmoid(raw_preds)
+
+        np_preds = preds.detach().cpu().numpy().flatten()
+        flat_labels = np_labels.flatten()
+        score = self.record_metrics(
+            episode_no, loss_value, np_preds, flat_labels,
+            callback=callback
+        )
+
+        return score
 
     def update_best_model(
         self, decay, train_eps, validate_eps, best_score, save_folder
@@ -259,65 +309,21 @@ class Trainer(object):
 
         return best_score
 
-    def batch_validate(
-        self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024)
-    ):
-        batch_x, np_labels = self.prepare_batch(
-            batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths,
-            is_training=False
-        )
-
-        torch_batch_x = torch.tensor(batch_x).to(self.device)
-        torch_labels = torch.tensor(np_labels).float()
-        torch_labels = torch_labels.to(self.device).detach()
-
-        # self.optimizer.zero_grad()
-        preds = self.model(torch_batch_x)
-        loss = self.criterion(preds, torch_labels)
-        loss_value = loss.item()
-
-        np_preds = preds.detach().cpu().numpy().flatten()
-        flat_labels = np_labels.flatten()
-        score = self.record_metrics(
-            episode_no, loss_value, np_preds, flat_labels,
-            callback=self.record_validate_errors
-        )
-
+    @staticmethod
+    def get_smooth_score(accum_score, decay, eps):
+        denom = (1 - decay ** eps) / (1 - decay)
+        score = accum_score / denom
         return score
 
-    def batch_train(
-        self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024), record=False
-    ):
-        batch_x, np_labels = self.prepare_batch(
-            batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths,
-            is_training=True
-        )
+    def accum_train(self, reward, decay):
+        self.accum_train_score += reward
+        self.accum_train_score *= decay
+        return self.accum_train_score
 
-        torch_batch_x = torch.tensor(batch_x).to(self.device)
-        torch_labels = torch.tensor(np_labels).float()
-        torch_labels = torch_labels.to(self.device).detach()
-        preds = self.model(torch_batch_x)
-
-        self.optimizer.zero_grad()
-        loss = self.criterion(preds, torch_labels)
-        loss_value = loss.item()
-        loss.backward()
-        self.optimizer.step()
-
-        callback = self.record_train_errors if record else None
-
-        np_preds = preds.detach().cpu().numpy().flatten()
-        flat_labels = np_labels.flatten()
-        score = self.record_metrics(
-            episode_no, loss_value, np_preds, flat_labels,
-            callback=callback
-        )
-
-        return score
+    def accum_validate(self, reward, decay):
+        self.accum_validate_score += reward
+        self.accum_validate_score *= decay
+        return self.accum_validate_score
 
     @staticmethod
     def record_metrics(
@@ -344,7 +350,7 @@ class Trainer(object):
 
     def prepare_batch(
         self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
-        is_training=True, mel_batch_size=16
+        is_training=True
     ):
         num_fake = int(batch_size * fake_p)
         fake_filepaths = self.get_rand_filepaths(
@@ -357,13 +363,16 @@ class Trainer(object):
 
         batch_filepaths = fake_filepaths + real_filepaths
         batch_labels = [1] * num_fake + [0] * num_real
+        random.shuffle(batch_labels)
 
         process_batch = utils.preprocess_from_filenames(
-            batch_filepaths, '', batch_labels, use_parallel=True,
-            num_cores=8, show_pbar=False
+            batch_filepaths, '', batch_labels, use_parallel=True
         )
 
         batch = [episode[0] for episode in process_batch]
+        labels = [episode[1] for episode in process_batch]
+        assert batch_labels == labels
+
         target_length = random.choice(range(
             target_lengths[0], target_lengths[1] + 1
         ))
@@ -391,11 +400,13 @@ class Trainer(object):
             len(data_batch), -1, utils.hparams.num_mels, 1
         ))
 
+        # np_labels = np.array(batch_labels)
+        # np_labels = np.expand_dims(np_labels, axis=-1)
         np_labels = np.array([
             np.ones((min_length, 1)) * label
             for label in batch_labels
         ])
-        # np_labels = np.expand_dims(np_labels, axis=-1)
+
         return batch_x, np_labels
 
     def record_validate_errors(
@@ -457,14 +468,6 @@ class Trainer(object):
 
         return filepath
 
-    def fetch_episode(self, label=0):
-        filepath = self.get_filepath(label=label)
-        array = process_audio_files_inference(
-            filepath, '', 'unlabeled'
-        )
-
-        return array
-
     @staticmethod
     def make_date_stamp():
         return Datetime.now().strftime("%y%m%d-%H%M")
@@ -479,7 +482,7 @@ class Trainer(object):
 
     @staticmethod
     def make_model():
-        discriminator = model.Discriminator(
+        discriminator = RnnModel.Discriminator(
             num_freq_bin=model_params['num_freq_bin'],
             init_neurons=model_params['num_conv_filters'],
             num_conv_blocks=model_params['num_conv_blocks'],
@@ -487,9 +490,7 @@ class Trainer(object):
             num_dense_neurons=model_params['num_dense_neurons'],
             dense_dropout=model_params['dense_dropout'],
             num_dense_layers=model_params['num_dense_layers'],
-            spatial_dropout_fraction=model_params[
-                'spatial_dropout_fraction'
-            ]
+            hidden_size=32
         )
 
         return discriminator

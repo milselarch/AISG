@@ -300,7 +300,7 @@ if model_params['use_default']:
         'num_dense_layers': 1,
         'num_dense_neurons': 50,
         'dense_dropout': 0.3,
-        'learning_rate': 0.001,
+        'learning_rate': 0.0001,
         'epochs': 1,
         'batch_size': 32,
         'residual_con': 2,

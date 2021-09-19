@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import RnnModel
 import torch.nn as nn
 import tensorflow as tf
 import torch.optim as optim
@@ -9,17 +8,29 @@ import random
 import torch
 import utils
 import time
+import audio
 import re
+
+import librosa.display
+import librosa.filters
+import librosa
 
 from sklearn.model_selection import train_test_split
 from constants import model_params, base_data_path
 from datetime import datetime as Datetime
+from wav_models import wav_model
+from pdb import set_trace as bp
 
+SET_BP = False
+
+def set_breakpoint():
+    if SET_BP:
+        bp()
 
 class Trainer(object):
     def __init__(
-        self, seed=42, test_p=0.05, use_cuda=True,
-        valid_p=0.05
+        self, seed=42, test_p=0.2, use_cuda=True,
+        valid_p=0.01
     ):
         self.tensorboard_started = False
         self.tfile_writer = None
@@ -33,12 +44,18 @@ class Trainer(object):
         self.seed = seed
 
         self.model = self.make_model()
+        self.wav_model_file = '../wav2lip/pretrained/wav2lip.pth'
+        self.bootstrap_model()
+
         self.dirpath = '../dessa-fake-voice/DS_10283_3336/LA/'
+        # self.lr = utils.model_params['learning_rate']
+        self.lr = 0.001
+
+        print(f'USING LEARNING RATE {self.lr}')
 
         self.criterion = nn.BCELoss()
         self.optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=utils.model_params['learning_rate']
+            self.model.parameters(), lr=self.lr
         )
 
         if self.use_cuda and torch.cuda.is_available():
@@ -67,6 +84,16 @@ class Trainer(object):
         self.test_reals = None
         self.test_fakes = None
         self.segregate_samples()
+
+    def bootstrap_model(self):
+        checkpoint = torch.load(self.wav_model_file)
+        state = checkpoint["state_dict"]
+        new_state = {}
+
+        for k, v in state.items():
+            new_state[k.replace('module.', '')] = v
+
+        self.model.wav2lip.load_state_dict(new_state)
 
     def segregate_samples(self):
         self.train_reals = []
@@ -124,7 +151,7 @@ class Trainer(object):
 
     def train(
         self, episodes=10 * 1000, batch_size=16,
-        fake_p=0.5, target_lengths=(128, 1024)
+        fake_p=0.5, mel_batch_size=16
     ):
         # ASVspoof2019_LA_cm_protocols
         self.tensorboard_start()
@@ -143,7 +170,7 @@ class Trainer(object):
 
                 self.batch_validate(
                     episode_no, batch_size=batch_size, fake_p=fake_p,
-                    target_lengths=target_lengths
+                    mel_batch_size=mel_batch_size
                 )
             else:
                 print(f'TR episode {episode_no}/{episodes}')
@@ -154,7 +181,7 @@ class Trainer(object):
 
                 self.batch_train(
                     episode_no, batch_size=batch_size, fake_p=fake_p,
-                    target_lengths=target_lengths,
+                    mel_batch_size=mel_batch_size,
                     record=run_validation
                 )
 
@@ -172,19 +199,23 @@ class Trainer(object):
 
     def batch_validate(
         self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024)
+        mel_batch_size=16
     ):
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths
+            mel_batch_size=mel_batch_size,
+            is_training=False
         )
 
-        torch_batch_x = torch.tensor(batch_x).to(self.device)
-        torch_labels = torch.tensor(np_labels).float()
+        torch_batch_x = torch.FloatTensor(batch_x).to(self.device)
+        torch_labels = torch.FloatTensor(np_labels).float()
         torch_labels = torch_labels.to(self.device).detach()
-        preds, h0 = self.model(torch_batch_x)
-        loss = self.criterion(preds, torch_labels)
-        loss_value = loss.item()
+        self.model.eval()
+
+        with torch.no_grad():
+            preds = self.model(torch_batch_x)
+            loss = self.criterion(preds, torch_labels)
+            loss_value = loss.item()
 
         np_preds = preds.cpu().detach().numpy().flatten()
         flat_labels = np_labels.flatten()
@@ -195,17 +226,20 @@ class Trainer(object):
 
     def batch_train(
         self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024), record=False
+        mel_batch_size=16, record=False
     ):
+        self.model.train()
+
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths
+            mel_batch_size=mel_batch_size,
+            is_training=True
         )
 
-        torch_batch_x = torch.tensor(batch_x).to(self.device)
-        torch_labels = torch.tensor(np_labels).float()
+        torch_batch_x = torch.FloatTensor(batch_x).to(self.device)
+        torch_labels = torch.FloatTensor(np_labels).float()
         torch_labels = torch_labels.to(self.device).detach()
-        preds, h0 = self.model(torch_batch_x)
+        preds = self.model(torch_batch_x)
 
         self.optimizer.zero_grad()
         loss = self.criterion(preds, torch_labels)
@@ -240,8 +274,57 @@ class Trainer(object):
             me=me, mse=mse, accuracy=accuracy
         )
 
+    @staticmethod
+    def to_mel_chunks(mel, fps, mel_step_size=16):
+        mel_chunks = []
+        mel_idx_multiplier = 80. / fps
+        i = 0
+
+        while 1:
+            start_idx = int(i * mel_idx_multiplier)
+            if start_idx + mel_step_size > len(mel[0]):
+                mel_chunks.append(mel[:, len(mel[0]) - mel_step_size:])
+                break
+
+            mel_chunk = mel[:, start_idx: start_idx + mel_step_size]
+            mel_chunks.append(mel_chunk)
+            i += 1
+
+        return mel_chunks
+
+    @classmethod
+    def random_sample_mels(
+        cls, mels, mel_batch_size=16, transpose=True, fps=24
+    ):
+        mel_chunks = cls.to_mel_chunks(mels, fps=fps)
+        index_range = range(0, len(mel_chunks) - mel_batch_size)
+
+        try:
+            index = random.choice(index_range)
+        except IndexError as e:
+            while mel_batch_size != len(mel_chunks):
+                pad_size = mel_batch_size - len(mel_chunks)
+                pad_size = min(pad_size, len(mel_chunks))
+                pad = random.sample(mel_chunks, pad_size)
+                mel_chunks.extend(pad)
+
+            index = 0
+
+        sub_mel_batch = mel_chunks[index: index + mel_batch_size]
+        np_sub_mel_batch = np.asarray(sub_mel_batch)
+        reshape_mel_batch = np.reshape(np_sub_mel_batch, [
+            len(np_sub_mel_batch), np_sub_mel_batch.shape[1],
+            np_sub_mel_batch.shape[2], 1
+        ])
+
+        if transpose:
+            reshape_mel_batch = np.transpose(
+                reshape_mel_batch, (0, 3, 1, 2)
+            )
+        return reshape_mel_batch
+
     def prepare_batch(
-        self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
+        self, batch_size=16, fake_p=0.5, mel_batch_size=16,
         is_training=True
     ):
         num_fake = int(batch_size * fake_p)
@@ -254,43 +337,45 @@ class Trainer(object):
         )
 
         batch_filepaths = fake_filepaths + real_filepaths
-        batch_labels = [1] * num_fake + [0] * num_real
-
+        prep_labels = [1] * num_fake + [0] * num_real
         process_batch = utils.preprocess_from_filenames(
-            batch_filepaths, '', batch_labels, use_parallel=True
+            batch_filepaths, '', prep_labels, use_parallel=True,
+            func=self.load_wav
         )
 
         batch = [episode[0] for episode in process_batch]
-        target_length = random.choice(range(
-            target_lengths[0], target_lengths[1] + 1
-        ))
-
-        min_length = float('inf')
-        for audio_arr in batch:
-            min_length = min(min_length, len(audio_arr))
+        batch_labels = [episode[1] for episode in process_batch]
+        assert batch_labels == prep_labels
 
         data_batch = []
-        min_length = min(min_length, target_length)
-
         for episode in batch:
-            if len(episode) == min_length:
-                data_batch.append(episode)
-                continue
-
-            max_start = len(episode) - min_length
-            start = random.choice(range(max_start))
-            clip_episode = episode[start: start + min_length]
+            clip_episode = self.random_sample_mels(
+                episode, mel_batch_size=mel_batch_size
+            )
             data_batch.append(clip_episode)
 
-        data_batch = np.array(data_batch)
-        assert data_batch.shape[2] == utils.hparams.num_mels
-        batch_x = data_batch.reshape((
-            len(data_batch), -1, utils.hparams.num_mels, 1
-        ))
+        np_labels = np.concatenate([
+            np.ones((mel_batch_size, 1)) * label
+            for label in batch_labels
+        ])
 
-        np_labels = np.array(batch_labels)
-        np_labels = np.expand_dims(np_labels, axis=-1)
-        return batch_x, np_labels
+        print('DATA BATCH')
+        # set_breakpoint()
+        return data_batch, np_labels
+
+    @staticmethod
+    def load_wav(filename, dirpath, file_mode):
+        if type(filename) is tuple:
+            filename = os.path.join(*filename)
+
+        path = os.path.join(dirpath, filename)
+        wav = audio.load_wav(path, sr=16000)
+        # mel = librosa.effects.trim(wav)
+        mel = audio.melspectrogram(wav)
+        mel, index = librosa.effects.trim(mel)
+
+        assert file_mode in (0, 1)
+        return mel, file_mode
 
     def record_validate_errors(
         self, step, loss, me=-1, mse=-1, accuracy=-1
@@ -308,7 +393,9 @@ class Trainer(object):
 
             self.vfile_writer.flush()
 
-    def record_train_errors(self, step, loss, me=-1, mse=-1, accuracy=-1):
+    def record_train_errors(
+        self, step, loss, me=-1, mse=-1, accuracy=-1
+    ):
         # input('PRE-RECORD')
         assert self.tensorboard_started
 
@@ -338,7 +425,7 @@ class Trainer(object):
     def get_rand_filepath(self, label=0, is_training=True):
         assert label in (0, 1)
 
-        if training:
+        if is_training:
             if label == 0:
                 filepath = random.choice(self.train_reals)
             else:
@@ -373,17 +460,7 @@ class Trainer(object):
 
     @staticmethod
     def make_model():
-        discriminator = RnnModel.Discriminator(
-            num_freq_bin=model_params['num_freq_bin'],
-            init_neurons=model_params['num_conv_filters'],
-            num_conv_blocks=model_params['num_conv_blocks'],
-            residual_con=model_params['residual_con'],
-            num_dense_neurons=model_params['num_dense_neurons'],
-            dense_dropout=model_params['dense_dropout'],
-            num_dense_layers=model_params['num_dense_layers'],
-            hidden_size=5
-        )
-
+        discriminator = wav_model.WavDisc()
         return discriminator
 
 

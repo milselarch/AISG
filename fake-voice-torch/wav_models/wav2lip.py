@@ -52,7 +52,8 @@ class Wav2Lip(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0),
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0),)
+            Conv2d(512, 512, kernel_size=1, stride=1, padding=0)
+        )
 
         self.face_decoder_blocks = nn.ModuleList([
             nn.Sequential(Conv2d(512, 512, kernel_size=1, stride=1, padding=0),),
@@ -80,9 +81,11 @@ class Wav2Lip(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),),]) # 96,96
 
-        self.output_block = nn.Sequential(Conv2d(80, 32, kernel_size=3, stride=1, padding=1),
+        self.output_block = nn.Sequential(
+            Conv2d(80, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
-            nn.Sigmoid())
+            nn.Sigmoid()
+        )
 
     def encode_audio(self, audio_sequences):
         input_dim_size = len(audio_sequences.size())

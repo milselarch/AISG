@@ -819,7 +819,7 @@ def process_audio_files_inference(filename, dirpath, mode):
 
 def preprocess_from_filenames(
     filenames, dirpath, mode, use_parallel=True,
-    show_pbar=True, num_cores=None
+    show_pbar=True, num_cores=None, func=process_audio_files_inference
 ):
     if show_pbar:
         iterable = tqdm(range(len(filenames)))
@@ -845,7 +845,7 @@ def preprocess_from_filenames(
             else:
                 file_mode = mode
 
-            delayed_func = delayed(process_audio_files_inference)
+            delayed_func = delayed(func)
             process = delayed_func(filename, dirpath, file_mode)
             process_list.append(process)
 
@@ -864,7 +864,7 @@ def preprocess_from_filenames(
             else:
                 file_mode = mode
 
-            preproc_list.append(process_audio_files_inference(
+            preproc_list.append(func(
                 filename, dirpath, file_mode
             ))
 
