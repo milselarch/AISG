@@ -795,6 +795,8 @@ def preprocess_and_save_audio_from_ray_parallel(
 def process_audio_files_inference(filename, dirpath, mode):
     if type(filename) is tuple:
         filename = os.path.join(*filename)
+    elif type(filename) == np.ndarray:
+        filename = os.path.join(*filename)
 
     path = os.path.join(dirpath, filename)
     audio_array, sample_rate = librosa.load(path, sr=16000)

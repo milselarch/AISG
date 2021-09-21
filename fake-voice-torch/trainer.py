@@ -1,24 +1,28 @@
 import bisect
 import os
 
-import numpy as np
 import model
+import numpy as np
 import torch.nn as nn
 import tensorflow as tf
 import torch.optim as optim
-import random
+import torch.multiprocessing as mp
 import pandas as pd
+import random
 import torch
 import utils
 import time
 import math
 import re
 
+from datetime import timedelta
 from sklearn.model_selection import train_test_split
+from torch.multiprocessing import Queue, Process, set_start_method
 from constants import model_params, base_data_path
 from datetime import datetime as Datetime
 from tqdm.auto import tqdm
 
+mp.set_start_method('spawn')
 torch.cuda.set_per_process_memory_fraction(0.5, 0)
 torch.cuda.empty_cache()
 
@@ -47,7 +51,9 @@ class Samples(object):
         self.durations = np.array(self.durations)
         indexes = np.argsort(self.durations)
 
-        print('TOTAL DURATION', sum(self.durations))
+        duration = int(sum(self.durations))
+        duration_obj = timedelta(seconds=duration)
+        print('TOTAL DURATION', duration_obj)
 
         self.filenames = self.filenames[indexes]
         self.durations = self.durations[indexes]
@@ -56,8 +62,11 @@ class Samples(object):
         assert max(self.cum_weights) <= 1
 
     def weighted_sample(self):
+        start = time.perf_counter()
         number = random.random()
         index = bisect.bisect_left(self.cum_weights, number)
+        end = time.perf_counter()
+        duration = end - start
         return self.filenames[index]
 
     def random_sample(self):
@@ -68,6 +77,10 @@ class Samples(object):
             return self.random_sample()
         else:
             return self.weighted_sample()
+
+    def get_samples(self, n):
+        samples = [self.sample() for k in range(n)]
+        return samples
 
 
 class Trainer(object):
@@ -433,8 +446,9 @@ class Trainer(object):
 
     def prepare_batch(
         self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
-        is_training=True, mel_batch_size=16
+        is_training=True
     ):
+        # start = time.perf_counter()
         num_fake = int(batch_size * fake_p)
         fake_filepaths = self.get_rand_filepaths(
             1, num_fake, is_training=is_training
@@ -484,7 +498,10 @@ class Trainer(object):
             np.ones((min_length, 1)) * label
             for label in batch_labels
         ])
+
         # np_labels = np.expand_dims(np_labels, axis=-1)
+        # end = time.perf_counter()
+        # duration = end - start
         return batch_x, np_labels
 
     def record_validate_errors(self, *args, **kwargs):
