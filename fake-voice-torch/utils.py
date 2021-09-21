@@ -799,12 +799,15 @@ def process_audio_files_inference(filename, dirpath, mode):
         filename = os.path.join(*filename)
 
     path = os.path.join(dirpath, filename)
-    audio_array, sample_rate = librosa.load(path, sr=16000)
 
+    audio_array, sample_rate = librosa.load(path, sr=16000)
     trim_audio_array, index = librosa.effects.trim(audio_array)
     mel_spec_array = melspectrogram(
         trim_audio_array, hparams=hparams
     ).T
+
+    # https://stackoverflow.com/questions/57072513/
+    duration = get_duration(filename)
 
     if mode == 'unlabeled':
         return mel_spec_array
@@ -817,7 +820,7 @@ def process_audio_files_inference(filename, dirpath, mode):
     else:
         raise ValueError(f'BAD MODE {mode}')
 
-    return mel_spec_array, label
+    return mel_spec_array, label, duration
 
 
 def get_durations(filenames, dirpath='', show_pbar=True):
@@ -850,7 +853,8 @@ def get_duration(filename, dirpath=''):
 
 def preprocess_from_filenames(
     filenames, dirpath, mode, use_parallel=True,
-    show_pbar=True, num_cores=None, func=process_audio_files_inference
+    show_pbar=True, num_cores=None, func=process_audio_files_inference,
+    cache=None, cache_threshold=30
 ):
     if show_pbar:
         iterable = tqdm(range(len(filenames)))
@@ -859,6 +863,9 @@ def preprocess_from_filenames(
 
     if num_cores is None:
         num_cores = multiprocessing.cpu_count()
+
+    arg_list = []
+    cache_list = []
 
     if use_parallel:
         process_list = []
@@ -877,8 +884,16 @@ def preprocess_from_filenames(
                 file_mode = mode
 
             delayed_func = delayed(func)
-            process = delayed_func(filename, dirpath, file_mode)
+            args = (filename, dirpath, file_mode)
+
+            if args in cache:
+                data = cache[args]
+                cache_list.append(data)
+                continue
+
+            process = delayed_func(*args)
             process_list.append(process)
+            arg_list.append(args)
 
         preproc_list = Parallel(n_jobs=num_cores)(process_list)
 
@@ -895,10 +910,26 @@ def preprocess_from_filenames(
             else:
                 file_mode = mode
 
-            preproc_list.append(func(
-                filename, dirpath, file_mode
-            ))
+            args = (filename, dirpath, file_mode)
+            if args in cache:
+                data = self.cache[args]
+                preproc_list.append(data)
+                continue
 
+            preproc_list.append(func(*args))
+            arg_list.append(args)
+
+    durations = []
+    for k, data in enumerate(preproc_list):
+        mel_spec_array, label, duration = data
+        durations.append(duration)
+        args = arg_list[k]
+
+        if (duration > cache_threshold) and (args not in cache):
+            cache[args] = data
+
+    # print('MAX DURATIONS', max(durations))
+    preproc_list.extend(cache_list)
     return preproc_list
 
 

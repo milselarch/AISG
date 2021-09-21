@@ -34,7 +34,8 @@ def round_sig(x, sig=2):
 class Trainer(BaseTrainer):
     def __init__(
         self, seed=42, test_p=0.1, use_cuda=True,
-        valid_p=0.01, weigh_sampling=True, add_aisg=True
+        valid_p=0.01, weigh_sampling=True, add_aisg=True,
+        cache_threshold=20
     ):
         super().__init__()
         self.date_stamp = self.make_date_stamp()
@@ -46,6 +47,8 @@ class Trainer(BaseTrainer):
         self.perf_decay = 0.96
 
         self.valid_p = valid_p
+        self.cache_threshold = cache_threshold
+        self.cache = {}
 
         self.use_cuda = use_cuda
         self.test_p = test_p
@@ -335,10 +338,15 @@ class Trainer(BaseTrainer):
         batch_filepaths = fake_filepaths + real_filepaths
         batch_labels = [1] * num_fake + [0] * num_real
 
+        cache_size = len(self.cache)
         process_batch = utils.preprocess_from_filenames(
             batch_filepaths, '', batch_labels, use_parallel=True,
-            num_cores=4, show_pbar=False
+            num_cores=4, show_pbar=False, cache=self.cache,
+            cache_threshold=self.cache_threshold
         )
+
+        if cache_size != len(self.cache):
+            cache_size = len(self.cache)
 
         batch = [episode[0] for episode in process_batch]
         target_length = random.choice(range(

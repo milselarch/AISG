@@ -40,7 +40,6 @@ class Samples(object):
             filenames=self.filenames, dirpath=dirpath
         )
 
-        self.filenames = np.array(self.filenames)
         self.durations = np.array(self.durations)
         indexes = np.argsort(self.durations)
 
@@ -48,7 +47,12 @@ class Samples(object):
         duration_obj = timedelta(seconds=duration)
         print('TOTAL DURATION', duration_obj)
 
-        self.filenames = self.filenames[indexes]
+        sorted_filenames = []
+        for index in indexes:
+            filename = self.filenames[index]
+            sorted_filenames.append(filename)
+
+        self.filenames = sorted_filenames
         self.durations = self.durations[indexes]
         cum_durations = np.cumsum(self.durations)
         self.cum_weights = cum_durations / sum(self.durations)
