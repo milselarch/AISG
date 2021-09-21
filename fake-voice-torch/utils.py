@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import librosa.display
 import librosa.filters
 import multiprocessing
+import soundfile as sf
 
 from sklearn.metrics import f1_score, accuracy_score
 from tqdm import tqdm
@@ -815,6 +816,34 @@ def process_audio_files_inference(filename, dirpath, mode):
         raise ValueError(f'BAD MODE {mode}')
 
     return mel_spec_array, label
+
+
+def get_durations(filenames, dirpath='', show_pbar=True):
+    if show_pbar:
+        iterable = tqdm(range(len(filenames)))
+    else:
+        iterable = range(len(filenames))
+
+    durations = []
+    for k in iterable:
+        filename = filenames[k]
+        if show_pbar:
+            iterable.set_description(str(filename))
+
+        duration = get_duration(filename, dirpath)
+        durations.append(duration)
+
+    return durations
+
+
+def get_duration(filename, dirpath=''):
+    if type(filename) is tuple:
+        filename = os.path.join(*filename)
+
+    file_path = os.path.join(dirpath, filename)
+    file = sf.SoundFile(file_path)
+    duration = file.frames / file.samplerate
+    return duration
 
 
 def preprocess_from_filenames(

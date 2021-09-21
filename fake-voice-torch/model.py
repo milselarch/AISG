@@ -140,6 +140,17 @@ class Discriminator(nn.Module):
         self.markers.append(tensor)
         return tensor
 
+    def load_parameters(self):
+        parameters = []
+
+        for layer in self.markers:
+            sub_params = layer.parameters()
+            sub_params = list(sub_params)
+            parameters.extend(sub_params)
+
+        parameters = tuple(parameters)
+        return parameters
+
     def test(self, image_inputs, kernel=3):
         conv_output = image_inputs
 

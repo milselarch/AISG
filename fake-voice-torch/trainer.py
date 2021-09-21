@@ -1,3 +1,4 @@
+import bisect
 import os
 
 import numpy as np
@@ -6,6 +7,7 @@ import torch.nn as nn
 import tensorflow as tf
 import torch.optim as optim
 import random
+import pandas as pd
 import torch
 import utils
 import time
@@ -23,10 +25,55 @@ torch.cuda.empty_cache()
 def round_sig(x, sig=2):
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
 
+
+class Samples(object):
+    def __init__(self, filenames):
+        self.filenames = filenames
+        self.durations = None
+        self.cum_weights = None
+        self.locked = False
+
+    def append(self, filename):
+        assert not self.locked
+        self.filenames.append(filename)
+
+    def reorder_by_durations(self, dirpath=''):
+        self.locked = True
+        self.durations = utils.get_durations(
+            filenames=self.filenames, dirpath=dirpath
+        )
+
+        self.filenames = np.array(self.filenames)
+        self.durations = np.array(self.durations)
+        indexes = np.argsort(self.durations)
+
+        print('TOTAL DURATION', sum(self.durations))
+
+        self.filenames = self.filenames[indexes]
+        self.durations = self.durations[indexes]
+        cum_durations = np.cumsum(self.durations)
+        self.cum_weights = cum_durations / sum(self.durations)
+        assert max(self.cum_weights) <= 1
+
+    def weighted_sample(self):
+        number = random.random()
+        index = bisect.bisect_left(self.cum_weights, number)
+        return self.filenames[index]
+
+    def random_sample(self):
+        return random.choice(self.filenames)
+
+    def sample(self):
+        if self.cum_weights is None:
+            return self.random_sample()
+        else:
+            return self.weighted_sample()
+
+
 class Trainer(object):
     def __init__(
-        self, seed=42, test_p=0.05, use_cuda=True,
-        valid_p=0.05
+        self, seed=42, test_p=0.1, use_cuda=True,
+        valid_p=0.01, weigh_sampling=True, add_aisg=True
     ):
         self.tensorboard_started = False
         self.tfile_writer = None
@@ -35,6 +82,7 @@ class Trainer(object):
 
         self.accum_train_score = 0
         self.accum_validate_score = 0
+        self.weigh_sampling = weigh_sampling
         self.save_best_every = 1000
         self.perf_decay = 0.96
 
@@ -46,12 +94,12 @@ class Trainer(object):
 
         self.model = self.make_model()
         self.dirpath = '../dessa-fake-voice/DS_10283_3336/LA/'
+        self.lr = model_params['learning_rate']
+        # self.lr = 0.001
 
         self.criterion = nn.BCELoss()
-        self.optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=utils.model_params['learning_rate']
-        )
+        self.params = self.model.load_parameters()
+        self.optimizer = optim.Adam(self.params, lr=self.lr)
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -59,10 +107,11 @@ class Trainer(object):
         else:
             self.device = torch.device("cpu")
 
-        self.audio_labels = self.get_labels()
+        self.add_aisg = add_aisg
+        self.audio_labels = self.get_labels(add_aisg)
         # print(f'KEYS {self.audio_labels}')
-        self.file_paths = list(self.audio_labels.keys())
         self.labels = list(self.audio_labels.values())
+        self.file_paths = list(self.audio_labels.keys())
 
         x_train, x_test, y_train, y_test = train_test_split(
             self.file_paths, self.labels,
@@ -74,35 +123,58 @@ class Trainer(object):
         self.y_train = y_train
         self.y_test = y_test
 
-        self.train_reals = None
-        self.train_fakes = None
-        self.test_reals = None
-        self.test_fakes = None
+        self.samples = None
         self.segregate_samples()
 
+    @property
+    def train_reals(self):
+        return self.samples['train_real']
+
+    @property
+    def train_fakes(self):
+        return self.samples['train_fake']
+
+    @property
+    def test_reals(self):
+        return self.samples['test_real']
+
+    @property
+    def test_fakes(self):
+        return self.samples['test_fake']
+
     def segregate_samples(self):
-        self.train_reals = []
-        self.train_fakes = []
-        self.test_reals = []
-        self.test_fakes = []
+        train_reals = Samples([])
+        train_fakes = Samples([])
+        test_reals = Samples([])
+        test_fakes = Samples([])
 
         for filepath in self.x_train:
             label = self.audio_labels[filepath]
 
             if label == 1:
-                self.train_fakes.append(filepath)
+                train_fakes.append(filepath)
             else:
-                self.train_reals.append(filepath)
+                train_reals.append(filepath)
 
         for filepath in self.x_test:
             label = self.audio_labels[filepath]
 
             if label == 1:
-                self.test_fakes.append(filepath)
+                test_fakes.append(filepath)
             else:
-                self.test_reals.append(filepath)
+                test_reals.append(filepath)
 
-    def get_labels(self):
+        self.samples = {
+            'train_real': train_reals, 'test_real': test_reals,
+            'train_fake': train_fakes, 'test_fake': test_fakes
+        }
+
+        if self.weigh_sampling:
+            for name, group_samples in self.samples.items():
+                print('REORDERING', name)
+                group_samples.reorder_by_durations()
+
+    def get_labels(self, add_aisg=True):
         filepath = os.path.join(
             self.dirpath, 'ASVspoof2019_LA_cm_protocols',
             'ASVspoof2019.LA.cm.train.trn.txt'
@@ -132,6 +204,23 @@ class Trainer(object):
                 assert 'spoof' in line
                 audio_labels[path] = 1
 
+        if add_aisg:
+            self.load_aisg(audio_labels)
+
+        return audio_labels
+
+    @staticmethod
+    def load_aisg(audio_labels):
+        # load real audios from AISG dataset
+        df = pd.read_csv('../datasets/extra-labels.csv')
+        filenames = df[df['label'] == 0]['filename'].to_numpy()
+
+        for filename in filenames:
+            name = filename[:filename.index('.')]
+            file_path = f'../datasets/train/audios-flac/{name}.flac'
+            audio_labels[file_path] = 0
+
+        print(f'LOADED {len(filenames)} AISG REAL FILES')
         return audio_labels
 
     def train(
@@ -398,37 +487,33 @@ class Trainer(object):
         # np_labels = np.expand_dims(np_labels, axis=-1)
         return batch_x, np_labels
 
-    def record_validate_errors(
-        self, step, loss, me=-1, mse=-1, accuracy=-1
+    def record_validate_errors(self, *args, **kwargs):
+        self.record_errors(
+            file_writer=self.vfile_writer, *args, **kwargs
+        )
+
+    def record_train_errors(self, *args, **kwargs):
+        self.record_errors(
+            file_writer=self.tfile_writer, *args, **kwargs
+        )
+
+    def record_errors(
+        self, file_writer, step, loss, me=-1, mse=-1,
+        accuracy=-1
     ):
         assert self.tensorboard_started
-        # input(f'VALIDATION ERRORS RECORD')
+        score = 2 * accuracy - 1
 
-        with self.vfile_writer.as_default():
+        with file_writer.as_default():
             tf.summary.scalar('loss', data=loss, step=step)
             tf.summary.scalar('mean_error', data=me, step=step)
             tf.summary.scalar('accuracy', data=accuracy, step=step)
+            tf.summary.scalar('score', data=score, step=step)
             tf.summary.scalar(
                 'mean_squared_error', data=mse, step=step
             )
 
-            self.vfile_writer.flush()
-
-    def record_train_errors(self, step, loss, me=-1, mse=-1, accuracy=-1):
-        # input('PRE-RECORD')
-        assert self.tensorboard_started
-
-        with self.tfile_writer.as_default():
-            tf.summary.scalar('loss', data=loss, step=step)
-            tf.summary.scalar('mean_error', data=me, step=step)
-            tf.summary.scalar('accuracy', data=accuracy, step=step)
-            tf.summary.scalar(
-                'mean_squared_error', data=mse, step=step
-            )
-
-            self.tfile_writer.flush()
-
-        # input('AFT-RECORD')
+            file_writer.flush()
 
     def get_rand_filepaths(
         self, label=0, episodes=10, is_training=True
@@ -446,14 +531,14 @@ class Trainer(object):
 
         if is_training:
             if label == 0:
-                filepath = random.choice(self.train_reals)
+                filepath = self.train_reals.sample()
             else:
-                filepath = random.choice(self.train_fakes)
+                filepath = self.train_fakes.sample()
         else:
             if label == 0:
-                filepath = random.choice(self.test_reals)
+                filepath = self.test_reals.sample()
             else:
-                filepath = random.choice(self.test_fakes)
+                filepath = self.test_fakes.sample()
 
         return filepath
 

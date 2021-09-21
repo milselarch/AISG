@@ -46,14 +46,14 @@ class Trainer(object):
 
         self.model = self.make_model()
         self.dirpath = '../dessa-fake-voice/DS_10283_3336/LA/'
-        self.lr = 0.001
+        self.lr = model_params['learning_rate']
+        # self.lr = 0.001
 
         print(f'USING LEARNING RATE {self.lr}')
 
         self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.RMSprop(
-            self.model.parameters(), lr=self.lr
-        )
+        self.params = self.model.load_parameters()
+        self.optimizer = optim.Adam(self.params, lr=self.lr)
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -186,7 +186,7 @@ class Trainer(object):
             pbar.set_description(desc)
             pbar.update(batch_size)
             episode_no += batch_size
-            time.sleep(0.1)
+            # time.sleep(0.1)
 
             # at_checkpoint = episode_no % self.save_best_every == 0
             episodes_past = episode_no - last_checkpoint
@@ -414,11 +414,13 @@ class Trainer(object):
     ):
         assert self.tensorboard_started
         # input(f'VALIDATION ERRORS RECORD')
+        score = 2 * accuracy - 1
 
         with self.vfile_writer.as_default():
             tf.summary.scalar('loss', data=loss, step=step)
             tf.summary.scalar('mean_error', data=me, step=step)
             tf.summary.scalar('accuracy', data=accuracy, step=step)
+            tf.summary.scalar('score', data=score, step=step)
             tf.summary.scalar(
                 'mean_squared_error', data=mse, step=step
             )
@@ -428,11 +430,13 @@ class Trainer(object):
     def record_train_errors(self, step, loss, me=-1, mse=-1, accuracy=-1):
         # input('PRE-RECORD')
         assert self.tensorboard_started
+        score = 2 * accuracy - 1
 
         with self.tfile_writer.as_default():
             tf.summary.scalar('loss', data=loss, step=step)
             tf.summary.scalar('mean_error', data=me, step=step)
             tf.summary.scalar('accuracy', data=accuracy, step=step)
+            tf.summary.scalar('score', data=score, step=step)
             tf.summary.scalar(
                 'mean_squared_error', data=mse, step=step
             )
@@ -490,7 +494,10 @@ class Trainer(object):
             num_dense_neurons=model_params['num_dense_neurons'],
             dense_dropout=model_params['dense_dropout'],
             num_dense_layers=model_params['num_dense_layers'],
-            hidden_size=32
+            hidden_size=32,
+            spatial_dropout_fraction=model_params[
+                'spatial_dropout_fraction'
+            ],
         )
 
         return discriminator

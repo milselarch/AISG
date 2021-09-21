@@ -31,6 +31,7 @@ class Discriminator(nn.Module):
     def __init__(
         self, num_freq_bin, init_neurons, num_conv_blocks,
         residual_con, num_dense_neurons, dense_dropout,
+        spatial_dropout_fraction,
         num_dense_layers, hidden_size=None, rnn_layers=1,
         final_only=False
     ):
@@ -42,6 +43,7 @@ class Discriminator(nn.Module):
         self.residual_con = residual_con
         self.dense_dropout = dense_dropout
         self.num_dense_layers = num_dense_layers
+        self.spatial_dropout_fraction = spatial_dropout_fraction
         self.hidden_size = hidden_size
         self.rnn_layers = rnn_layers
 
@@ -141,6 +143,16 @@ class Discriminator(nn.Module):
             self.hidden_size, out_features=1
         ))
 
+    @classmethod
+    def spatial_dropout_1d(cls, tensor, prob):
+        # https://stackoverflow.com/questions/50393666/
+        # how-to-understand-spatialdropout1d-and-when-to-use-it
+        # https://discuss.pytorch.org/t/spatial-dropout-in-pytorch/21400/2
+        tensor = tensor.permute(0, 2, 1)
+        tensor = nn.functional.dropout2d(tensor, prob)
+        tensor = tensor.permute(0, 2, 1)
+        return tensor
+
     def to_cuda(self):
         super().cuda()
         for tensor in self.markers:
@@ -151,6 +163,17 @@ class Discriminator(nn.Module):
         # assert isinstance(tensor, torch.Tensor)
         self.markers.append(tensor)
         return tensor
+
+    def load_parameters(self):
+        parameters = []
+
+        for layer in self.markers:
+            sub_params = layer.parameters()
+            sub_params = list(sub_params)
+            parameters.extend(sub_params)
+
+        parameters = tuple(parameters)
+        return parameters
 
     def test(self, image_inputs, kernel=3):
         conv_output = image_inputs
@@ -227,6 +250,11 @@ class Discriminator(nn.Module):
                 else:
                     conv_output = sub_conv_output
 
+                if layer_no < self.num_conv_blocks - 1:
+                    conv_output = self.spatial_dropout_1d(
+                        conv_output, prob=self.spatial_dropout_fraction
+                    )
+
             # print('POOL SHAPES')
             # print(image_inputs.shape, conv_output.shape)
             conv_dense = custom_pooling([image_inputs, conv_output])
@@ -274,6 +302,7 @@ class Discriminator(nn.Module):
             rnn_output = rnn_output[:, -1, :]
 
         final_val = self.final_dense(rnn_output)
+
         if sigmoid:
             final_val = torch.sigmoid(final_val)
 
