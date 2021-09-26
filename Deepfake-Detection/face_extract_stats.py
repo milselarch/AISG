@@ -43,6 +43,7 @@ profile_path = f'../stats/extract-{stamp}.profile'
 base_filename = "face_map_stats-4-20-20210902-164550.csv"
 base_faces = pd.read_csv(f'../stats/{base_filename}')
 base_faces['prediction'] = None
+invalid_videos = []
 
 print(f'rescale is {rescale}')
 print(f'CSV filename is {output_path}')
@@ -57,7 +58,7 @@ model = model.cuda() if cuda else model
 
 
 def run():
-    pbar = tqdm(range(150, num_videos))
+    pbar = tqdm(range(num_videos))
 
     for k in pbar:
         filename = dataset.all_videos[k]
@@ -72,6 +73,7 @@ def run():
             print(f'FILENAME LOAD FAILED {filename}')
             continue
         except ValueError as e:
+            invalid_videos.append(filename)
             print(f'VALUE ERROR {filename} {k}')
             raise e
 
@@ -130,6 +132,7 @@ def run():
 
     base_faces.to_csv(output_path, index=False)
     print(f'SAVED TO {output_path}')
+    print(f'INVALID VIDEOS', invalid_videos)
 
 
 if __name__ == '__main__':
