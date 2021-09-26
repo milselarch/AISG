@@ -113,12 +113,20 @@ class Discriminator(nn.Module):
             else:
                 input_neurons = num_dense_neurons
 
+            """
             dense_net = nn.Sequential(
                 nn.Linear(input_neurons, num_dense_neurons),
                 nn.BatchNorm1d(
                     num_features=num_dense_neurons,
                     momentum=0.99, eps=0.001
                 ),
+                nn.LeakyReLU(negative_slope=self.neg_slope),
+                nn.Dropout(p=dense_dropout)
+            )
+            """
+
+            dense_net = nn.Sequential(
+                nn.Linear(input_neurons, num_dense_neurons),
                 nn.LeakyReLU(negative_slope=self.neg_slope),
                 nn.Dropout(p=dense_dropout)
             )

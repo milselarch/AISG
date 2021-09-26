@@ -328,11 +328,14 @@ class Trainer(BaseTrainer):
         torch_labels = torch_labels.to(self.device).detach()
 
         # self.optimizer.zero_grad()
-        # self.model.eval()
-        preds = self.model(torch_batch_x)
-        loss = self.criterion(preds, torch_labels)
-        loss_value = loss.item()
+        self.model.train(False)
 
+        with torch.no_grad():
+            preds = self.model(torch_batch_x)
+            loss = self.criterion(preds, torch_labels)
+            loss_value = loss.item()
+
+        self.model.train(True)
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = np_labels.flatten()
         score = self.record_metrics(
