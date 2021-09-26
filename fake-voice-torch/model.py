@@ -40,26 +40,26 @@ class Discriminator(nn.Module):
         self.num_dense_layers = num_dense_layers
         self.spatial_dropout_fraction = spatial_dropout_fraction
 
-        self.markers = []
-        self.convnet_3_layers = {}
-        self.convnet_5_layers = {}
-        self.convnet_7_layers = {}
+        self.convnet_3_layers = nn.ModuleDict()
+        self.convnet_5_layers = nn.ModuleDict()
+        self.convnet_7_layers = nn.ModuleDict()
 
-        self.res_convnet_3_layers = {}
-        self.res_convnet_5_layers = {}
-        self.res_convnet_7_layers = {}
+        self.res_convnet_3_layers = nn.ModuleDict()
+        self.res_convnet_5_layers = nn.ModuleDict()
+        self.res_convnet_7_layers = nn.ModuleDict()
 
-        self.dense_net_layers = []
+        self.dense_net_layers = nn.ModuleList()
         self.kernels = (3, 5, 7)
         self.neg_slope = 0.01
 
-        mark = self.mark
         prev_outputs = num_freq_bin
 
         for kernel in self.kernels:
             prev_outputs = num_freq_bin
 
             for layer_no in range(num_conv_blocks):
+                layer_name = f'layer_{layer_no}'
+
                 if layer_no == 0:
                     outputs = init_neurons
                 else:
@@ -77,7 +77,7 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError
 
-                convnet_layer = mark(nn.Sequential(
+                convnet_layer = nn.Sequential(
                     self.causal_conv_1d(
                         in_channels=prev_outputs,
                         kernel_size=kernel,
@@ -85,26 +85,26 @@ class Discriminator(nn.Module):
                     ),
                     nn.Linear(kernel, 1),
                     nn.LeakyReLU(negative_slope=self.neg_slope)
-                ))
+                )
 
-                convnet_layers[layer_no] = convnet_layer
+                convnet_layers[layer_name] = convnet_layer
                 # print(f'CONV LAYER {layer_no} {kernel}')
                 # print(convnet_layer)
 
                 if residual_con > 0 and (layer_no - residual_con) >= 0:
-                    res_convnet_layer = mark(nn.Sequential(
+                    res_convnet_layer = nn.Sequential(
                         nn.Conv1d(
                             in_channels=prev_outputs, stride=1,
                             kernel_size=1, out_channels=outputs
                         ),
                         nn.Linear(1, 1)
-                    ))
+                    )
                     # print(f'RES CONV LAYER {layer_no} {kernel}')
                     # print(res_convnet_layer)
                 else:
                     res_convnet_layer = None
 
-                res_convnet_layers[layer_no] = res_convnet_layer
+                res_convnet_layers[layer_name] = res_convnet_layer
                 prev_outputs = outputs
 
         for layer_no in range(self.num_dense_layers):
@@ -113,7 +113,7 @@ class Discriminator(nn.Module):
             else:
                 input_neurons = num_dense_neurons
 
-            dense_net = mark(nn.Sequential(
+            dense_net = nn.Sequential(
                 nn.Linear(input_neurons, num_dense_neurons),
                 nn.BatchNorm1d(
                     num_features=num_dense_neurons,
@@ -121,41 +121,19 @@ class Discriminator(nn.Module):
                 ),
                 nn.LeakyReLU(negative_slope=self.neg_slope),
                 nn.Dropout(p=dense_dropout)
-            ))
+            )
 
             self.dense_net_layers.append(dense_net)
 
-        self.final_dense = mark(nn.Linear(
+        self.final_dense = nn.Linear(
             num_dense_neurons, out_features=1
-        ))
-
-    def to_cuda(self):
-        super().cuda()
-        for tensor in self.markers:
-            # assert isinstance(tensor, torch.Tensor)
-            tensor.cuda()
-
-    def mark(self, tensor):
-        # assert isinstance(tensor, torch.Tensor)
-        self.markers.append(tensor)
-        return tensor
-
-    def load_parameters(self):
-        parameters = []
-
-        for layer in self.markers:
-            sub_params = layer.parameters()
-            sub_params = list(sub_params)
-            parameters.extend(sub_params)
-
-        parameters = tuple(parameters)
-        return parameters
+        )
 
     def test(self, image_inputs, kernel=3):
         conv_output = image_inputs
 
         for layer_no in range(self.num_conv_blocks):
-            # print(f'LAYER NO {layer_no}')
+            layer_name = f'layer_{layer_no}'
 
             if kernel == 3:
                 convnet_layers = self.convnet_3_layers
@@ -169,8 +147,8 @@ class Discriminator(nn.Module):
             else:
                 raise ValueError
 
-            convnet_layer = convnet_layers[layer_no]
-            res_convnet_layer = res_convnet_layers[layer_no]
+            convnet_layer = convnet_layers[layer_name]
+            res_convnet_layer = res_convnet_layers[layer_name]
             # print(f'CONVNET LAYER {convnet_layer}')
             sub_conv_output = convnet_layer(conv_output)
             # print(f'CONV SHAPE {sub_conv_output.shape}')
@@ -197,6 +175,7 @@ class Discriminator(nn.Module):
             conv_output = image_inputs
 
             for layer_no in range(self.num_conv_blocks):
+                layer_name = f'layer_{layer_no}'
                 # print(f'LAYER NO {layer_no}')
 
                 if kernel == 3:
@@ -211,8 +190,8 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError
 
-                convnet_layer = convnet_layers[layer_no]
-                res_convnet_layer = res_convnet_layers[layer_no]
+                convnet_layer = convnet_layers[layer_name]
+                res_convnet_layer = res_convnet_layers[layer_name]
                 # print(f'CONVNET LAYER {convnet_layer}')
                 sub_conv_output = convnet_layer(conv_output)
                 # print(f'CONV SHAPE {sub_conv_output.shape}')
