@@ -1,6 +1,8 @@
 from trainer import Trainer
 
-trainer = Trainer(cache_threshold=20)
+trainer = Trainer(
+    cache_threshold=20, use_batch_norm=True
+)
 trainer.train(
     episodes=1500 * 1000, batch_size=32
 )

@@ -35,7 +35,8 @@ class Trainer(BaseTrainer):
     def __init__(
         self, seed=42, test_p=0.1, use_cuda=True,
         valid_p=0.05, weigh_sampling=True, add_aisg=True,
-        cache_threshold=20, load_dataset=True, save_threshold=0.01
+        cache_threshold=20, load_dataset=True, save_threshold=0.01,
+        use_batch_norm=True, params=None
     ):
         super().__init__()
         self.date_stamp = self.make_date_stamp()
@@ -51,11 +52,14 @@ class Trainer(BaseTrainer):
         self.cache_threshold = cache_threshold
         self.cache = {}
 
+        self.use_batch_norm = use_batch_norm
+
         self.use_cuda = use_cuda
         self.test_p = test_p
         self.seed = seed
 
-        self.model = self.make_model()
+        self.params = params
+        self.model = self.make_model(params)
         self.dirpath = '../dessa-fake-voice/DS_10283_3336/LA/'
         self.lr = model_params['learning_rate']
         # self.lr = 0.001
@@ -280,6 +284,9 @@ class Trainer(BaseTrainer):
 
         return best_score
 
+    def torchify(self, batch_x, np_labels):
+        pass
+
     def batch_train(
         self, episode_no, batch_size=16, fake_p=0.5,
         target_lengths=(128, 1024), record=False
@@ -345,7 +352,7 @@ class Trainer(BaseTrainer):
 
         return score
 
-    def batch_predict(self, batch_x):
+    def batch_predict(self, batch_x, to_numpy=True):
         if type(batch_x) is str:
             batch_x = [batch_x]
 
@@ -354,17 +361,22 @@ class Trainer(BaseTrainer):
             labels = [1] * len(batch_x)
             batch_x, np_labels = self.load_batch(batch_x, labels)
 
-        assert type(batch_x) is np.ndarray
-        torch_batch_x = torch.tensor(batch_x).to(self.device)
+        if type(batch_x) is np.ndarray:
+            torch_batch_x = torch.tensor(batch_x).to(self.device)
+        else:
+            assert type(batch_x) is torch.Tensor
+            torch_batch_x = batch_x
 
         self.model.eval()
         preds = self.model(torch_batch_x)
-        np_preds = preds.detach().cpu().numpy()
-        return np_preds
+        if to_numpy:
+            preds = preds.detach().cpu().numpy()
+
+        return preds
 
     def prepare_batch(
         self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
-        is_training=True
+        is_training=True, randomize=True
     ):
         # start = time.perf_counter()
         num_fake = int(batch_size * fake_p)
@@ -378,9 +390,21 @@ class Trainer(BaseTrainer):
 
         batch_filepaths = fake_filepaths + real_filepaths
         batch_labels = [1] * num_fake + [0] * num_real
-        return self.load_batch(
+        batch_x, np_labels = self.load_batch(
             batch_filepaths, batch_labels, target_lengths
         )
+
+        assert type(batch_x) is np.ndarray
+        assert type(np_labels) is np.ndarray
+
+        if randomize:
+            indices = np.arange(len(batch_x))
+            assert len(batch_x) == len(np_labels)
+            random.shuffle(indices)
+            batch_x = batch_x[indices]
+            np_labels = np_labels[indices]
+
+        return batch_x, np_labels
 
     def load_batch(
         self, batch_filepaths, batch_labels, target_lengths=None
@@ -432,17 +456,21 @@ class Trainer(BaseTrainer):
         # duration = end - start
         return batch_x, np_labels
 
-    @staticmethod
-    def make_model():
+    def make_model(self, params=None):
+        if params is None:
+            params = model_params
+
         discriminator = model.Discriminator(
-            num_freq_bin=model_params['num_freq_bin'],
-            init_neurons=model_params['num_conv_filters'],
-            num_conv_blocks=model_params['num_conv_blocks'],
-            residual_con=model_params['residual_con'],
-            num_dense_neurons=model_params['num_dense_neurons'],
-            dense_dropout=model_params['dense_dropout'],
-            num_dense_layers=model_params['num_dense_layers'],
-            spatial_dropout_fraction=model_params[
+            bn_momentum=0.99,
+            use_batch_norm=self.use_batch_norm,
+            num_freq_bin=params['num_freq_bin'],
+            init_neurons=params['num_conv_filters'],
+            num_conv_blocks=params['num_conv_blocks'],
+            residual_con=params['residual_con'],
+            num_dense_neurons=params['num_dense_neurons'],
+            dense_dropout=params['dense_dropout'],
+            num_dense_layers=params['num_dense_layers'],
+            spatial_dropout_fraction=params[
                 'spatial_dropout_fraction'
             ]
         )
