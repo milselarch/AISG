@@ -791,6 +791,8 @@ def preprocess_and_save_audio_from_ray_parallel(
     else:
         print("Preprocessing already done!")
 
+def process(*args, **kwargs):
+    return process_audio_files_inference(*args, **kwargs)
 
 def process_audio_files_inference(filename, dirpath, mode):
     if type(filename) is tuple:
@@ -849,6 +851,15 @@ def get_duration(filename, dirpath=''):
     file = sf.SoundFile(file_path)
     duration = file.frames / file.samplerate
     return duration
+
+def get_frames(filename, dirpath=''):
+    if type(filename) is tuple:
+        filename = os.path.join(*filename)
+
+    file_path = os.path.join(dirpath, filename)
+    file = sf.SoundFile(file_path)
+    frames = file.frames
+    return frames
 
 
 def preprocess_from_filenames(

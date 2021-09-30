@@ -378,6 +378,7 @@ class Trainer(BaseTrainer):
         self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
         is_training=True, randomize=True
     ):
+        # why does randomizing filenames not work?
         # start = time.perf_counter()
         num_fake = int(batch_size * fake_p)
         fake_filepaths = self.get_rand_filepaths(
