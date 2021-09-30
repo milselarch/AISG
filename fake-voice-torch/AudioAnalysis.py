@@ -268,11 +268,84 @@ class AudioAnalysis(object):
         plt.show()
 
     def manual_cross_cmp(self):
-        df = pd.read_csv('csvs/cross-extra-210930-1006.csv')
-        plt.hist(df['distance'], bins=30)
-        plt.show()
+        path = 'csvs/cross-extra-210930-1006.csv'
+        df = pd.read_csv(path)
+        fakes = df['fake'].to_numpy().tolist()
+        label = 0
+        index = -1
+
+        while True:
+            index += 1
+            fake_filename = fakes[index]
+            cond = df['fake'] == fake_filename
+            label = df[cond]['fake_audio'].to_numpy()[0]
+
+            if not np.isnan(label):
+                print(df[cond])
+            else:
+                break
+
+        while index < len(fakes):
+            fake_filename = fakes[index]
+            file_path = f'../datasets/train/videos/{fake_filename}'
+            os.system(f'xdg-open {file_path}')
+            cond = df['fake'] == fake_filename
+
+            row = df[cond]
+            label = df[cond]['fake_audio'].to_numpy()[0]
+            if not np.isnan(label):
+                print(f'LABEL', label)
+
+            print(row)
+
+            valid = False
+            stop = False
+
+            while not valid:
+                valid = True
+
+                while True:
+                    try:
+                        ans = input(f'[{index}]: ').strip()
+                        break
+                    except KeyboardInterrupt:
+                        pass
+
+                if ans == 'u':
+                    index -= 2
+                elif ans == 'q':
+                    stop = True
+                elif ans == 'r':
+                    df.loc[cond, 'fake_audio'] = 0
+                    df.to_csv(path, index=False)
+                    print('updated to 0')
+                elif ans == 'f':
+                    df.loc[cond, 'fake_audio'] = 1
+                    df.to_csv(path, index=False)
+                    print('updated to 1')
+                elif ans == 'h':
+                    df.loc[cond, 'fake_audio'] = 0.5
+                    df.to_csv(path, index=False)
+                    print('updated to 0.5')
+                elif ans == 'n':
+                    break
+                elif ans.startswith('goto '):
+                    try:
+                        index = int(ans[5:]) - 1
+                    except TypeError:
+                        valid = False
+                else:
+                    valid = False
+
+            if stop:
+                break
+
+            index += 1
+
+        df.to_csv(path, index=False)
+        print(f'saved to {path}')
 
 
 if __name__ == '__main__':
     analyser = AudioAnalysis()
-    analyser.evaluate_cross_cmp()
+    analyser.manual_cross_cmp()
