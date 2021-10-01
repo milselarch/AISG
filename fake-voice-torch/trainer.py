@@ -1,4 +1,5 @@
 import bisect
+import copy
 import os
 
 import model
@@ -24,7 +25,7 @@ from datetime import datetime as Datetime
 from tqdm.auto import tqdm
 
 mp.set_start_method('spawn')
-torch.cuda.set_per_process_memory_fraction(0.5, 0)
+# torch.cuda.set_per_process_memory_fraction(0.5, 0)
 torch.cuda.empty_cache()
 
 def round_sig(x, sig=2):
@@ -36,7 +37,8 @@ class Trainer(BaseTrainer):
         self, seed=42, test_p=0.1, use_cuda=True,
         valid_p=0.05, weigh_sampling=True, add_aisg=True,
         cache_threshold=20, load_dataset=True, save_threshold=0.01,
-        use_batch_norm=True, params=None
+        use_batch_norm=True, params=None, use_avs=False,
+        train_version=1, normalize_audio=False
     ):
         super().__init__()
         self.date_stamp = self.make_date_stamp()
@@ -50,8 +52,10 @@ class Trainer(BaseTrainer):
 
         self.valid_p = valid_p
         self.cache_threshold = cache_threshold
+        self.train_version = train_version
         self.cache = {}
 
+        self.normalize_audio = normalize_audio
         self.use_batch_norm = use_batch_norm
 
         self.use_cuda = use_cuda
@@ -75,6 +79,7 @@ class Trainer(BaseTrainer):
             self.device = torch.device("cpu")
 
         self.add_aisg = add_aisg
+        self.use_avs = use_avs
 
         self.audio_labels = None
         self.labels = None
@@ -93,7 +98,14 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
     def load_dataset(self, add_aisg):
-        self.audio_labels = self.get_labels(add_aisg)
+        self.audio_labels = {}
+
+        if self.use_avs:
+            self.audio_labels = self.get_labels()
+
+        if add_aisg:
+            self.load_aisg2()
+
         # print(f'KEYS {self.audio_labels}')
         self.labels = list(self.audio_labels.values())
         self.file_paths = list(self.audio_labels.keys())
@@ -110,7 +122,7 @@ class Trainer(BaseTrainer):
 
         self.segregate_samples()
 
-    def get_labels(self, add_aisg=True):
+    def get_labels(self):
         filepath = os.path.join(
             self.dirpath, 'ASVspoof2019_LA_cm_protocols',
             'ASVspoof2019.LA.cm.train.trn.txt'
@@ -125,9 +137,8 @@ class Trainer(BaseTrainer):
             filename = matches[0]
 
             subdir = 'ASVspoof2019_LA_train/flac'
-            path = (
-                os.path.join(self.dirpath, subdir),
-                f'{filename}.flac'
+            path = os.path.join(
+                self.dirpath, subdir, f'{filename}.flac'
             )
 
             # print(f'PATH {path}')
@@ -140,10 +151,26 @@ class Trainer(BaseTrainer):
                 assert 'spoof' in line
                 audio_labels[path] = 1
 
-        if add_aisg:
-            self.load_aisg(audio_labels)
-
         return audio_labels
+
+    def load_aisg2(self):
+        # load real audios from AISG dataset
+        df = pd.read_csv('csvs/unique-audios-210930-2218.csv')
+        real_cond = df['fake_audio'] == 0
+        fake_cond = df['fake_audio'] == 1
+
+        real_filenames = df[real_cond]['filename'].to_numpy()
+        fake_filenames = df[fake_cond]['filename'].to_numpy()
+        filenames = np.concatenate([real_filenames, fake_filenames])
+
+        for filename in filenames:
+            name = filename[:filename.index('.')]
+            file_path = f'../datasets-local/audios-flac/{name}.flac'
+            label = 0 if filename in real_filenames else 1
+            self.audio_labels[file_path] = label
+
+        print(f'LOADED {len(real_filenames)} AISG REAL FILES')
+        print(f'LOADED {len(fake_filenames)} AISG FAKE FILES')
 
     @staticmethod
     def load_aisg(audio_labels):
@@ -161,7 +188,7 @@ class Trainer(BaseTrainer):
 
     def train(
         self, episodes=10 * 1000, batch_size=16,
-        fake_p=0.5, target_lengths=(128, 1024)
+        fake_p=0.5, target_lengths=(128, 256)
     ):
         # ASVspoof2019_LA_cm_protocols
         self.tensorboard_start()
@@ -284,10 +311,58 @@ class Trainer(BaseTrainer):
 
         return best_score
 
-    def torchify(self, batch_x, np_labels):
-        pass
+    def batch_train(self, *args, **kwargs):
+        if self.train_version == 1:
+            return self.batch_train_v1(*args, **kwargs)
+        elif self.train_version == 2:
+            return self.batch_train_v2(*args, **kwargs)
 
-    def batch_train(
+        raise ValueError(f'BAD TRAIN VERSION {self.train_version}')
+
+    def batch_train_v2(
+        self, episode_no, batch_size=16, fake_p=0.5,
+        target_lengths=(128, 1024), record=False
+    ):
+        self.model.train()
+        batch_x, np_labels = self.prepare_batch(
+            batch_size=batch_size, fake_p=fake_p,
+            target_lengths=target_lengths,
+            is_training=True, randomize=True
+        )
+
+        torch_batch_x = torch.tensor(batch_x).to(self.device)
+        torch_labels = torch.tensor(np_labels).float()
+        torch_labels = torch_labels.to(self.device).detach()
+
+        total_loss = 0
+        self.optimizer.zero_grad()
+        batch_outputs = []
+
+        for k, image_input in enumerate(torch_batch_x):
+            episode_labels = torch_labels[k]
+            episode_preds = self.model.forward_image(image_input)
+            loss = self.criterion(episode_preds, episode_labels)
+            loss_value = loss.item()
+            loss.backward()
+
+            total_loss += loss_value / batch_size
+            batch_preds = torch.unsqueeze(episode_preds, 0)
+            batch_outputs.append(batch_preds)
+
+        self.optimizer.step()
+        callback = self.record_train_errors if record else None
+        batch_outputs = torch.cat(batch_outputs, dim=0)
+
+        flat_labels = np_labels.flatten()
+        np_preds = batch_outputs.detach().cpu().numpy().flatten()
+        score = self.record_metrics(
+            episode_no, total_loss, np_preds, flat_labels,
+            callback=callback
+        )
+
+        return score
+
+    def batch_train_v1(
         self, episode_no, batch_size=16, fake_p=0.5,
         target_lengths=(128, 1024), record=False
     ):
@@ -327,7 +402,7 @@ class Trainer(BaseTrainer):
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
             target_lengths=target_lengths,
-            is_training=False
+            is_training=False, randomize=True
         )
 
         torch_batch_x = torch.tensor(batch_x).to(self.device)
@@ -391,20 +466,26 @@ class Trainer(BaseTrainer):
 
         batch_filepaths = fake_filepaths + real_filepaths
         batch_labels = [1] * num_fake + [0] * num_real
+
+        if randomize:
+            new_batch_labels = []
+            new_batch_filepaths = []
+            indices = list(range(len(batch_filepaths)))
+            random.shuffle(indices)
+
+            for index in indices:
+                new_batch_filepaths.append(batch_filepaths[index])
+                new_batch_labels.append(batch_labels[index])
+
+            batch_filepaths = new_batch_filepaths
+            batch_labels = new_batch_labels
+
         batch_x, np_labels = self.load_batch(
             batch_filepaths, batch_labels, target_lengths
         )
 
         assert type(batch_x) is np.ndarray
         assert type(np_labels) is np.ndarray
-
-        if randomize:
-            indices = np.arange(len(batch_x))
-            assert len(batch_x) == len(np_labels)
-            random.shuffle(indices)
-            batch_x = batch_x[indices]
-            np_labels = np_labels[indices]
-
         return batch_x, np_labels
 
     def load_batch(
@@ -413,7 +494,8 @@ class Trainer(BaseTrainer):
         process_batch = utils.preprocess_from_filenames(
             batch_filepaths, '', batch_labels, use_parallel=True,
             num_cores=4, show_pbar=False, cache=self.cache,
-            cache_threshold=self.cache_threshold
+            cache_threshold=self.cache_threshold,
+            normalize=self.normalize_audio
         )
 
         batch = [episode[0] for episode in process_batch]

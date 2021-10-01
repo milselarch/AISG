@@ -5,7 +5,7 @@ import pandas as pd
 class VideoArray(object):
     def __init__(
         self, out_video, width, height, frames,
-        name, out_pil=None, rescale=1,
+        name, out_pil=None, rescale=1, frame_mapping=None,
         raw_video=None
     ):
         self.name = name
@@ -13,6 +13,8 @@ class VideoArray(object):
         self.width = width
         self.height = height
         self.frames = frames
+
+        self.frame_mapping = frame_mapping
 
         self.out_pil = out_pil
         self.rescale = rescale
@@ -210,7 +212,7 @@ def load_video(
         "Supply either 'every_n_frames' or 'specific_frames', not both"
     )
 
-    if type(cap) is str:
+    if type(cap) == str:
         cap = cv2.VideoCapture(filename)
 
     n_frames_in = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -235,6 +237,7 @@ def load_video(
         specific_frames = list(range(0, n_frames_in, every_n_frames))
 
     n_frames_out = len(specific_frames)
+    frame_mapping = {}
     out_pil = []
 
     out_video = np.empty(
@@ -244,6 +247,7 @@ def load_video(
 
     i_frame_in = 0
     i_frame_out = 0
+    frame_no = 0
     ret = True
 
     while i_frame_in < n_frames_in and ret:
@@ -278,6 +282,7 @@ def load_video(
                 frame_in = np.zeros((height_out, width_out, 3))
 
             out_video[i_frame_out] = frame_in
+            frame_mapping[i_frame_in] = frame_in
             i_frame_out += 1
 
             if inc_pil:
@@ -307,7 +312,7 @@ def load_video(
     return VideoArray(
         out_video, width=width_out, height=height_out,
         frames=n_frames_out, out_pil=out_pil, rescale=scale,
-        raw_video=cap, name=filename
+        raw_video=cap, name=filename, frame_mapping=frame_mapping
     )
 
 

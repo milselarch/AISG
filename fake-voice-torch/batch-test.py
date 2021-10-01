@@ -16,7 +16,7 @@ def invoke(seed=420, randomize=False, validator=False):
     random.seed(seed)
 
     batch_x, np_labels = trainer.prepare_batch(
-        batch_size=32, fake_p=0.5,
+        batch_size=8, fake_p=0.5,
         target_lengths=(128, 1024),
         is_training=False
     )
@@ -62,6 +62,6 @@ def invoke(seed=420, randomize=False, validator=False):
 
 invoke()
 invoke(validator=True)
-# invoke(randomize=True)
+invoke(randomize=True)
 # invoke(randomize=True)
 print('DONE')

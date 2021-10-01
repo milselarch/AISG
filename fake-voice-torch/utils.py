@@ -794,7 +794,9 @@ def preprocess_and_save_audio_from_ray_parallel(
 def process(*args, **kwargs):
     return process_audio_files_inference(*args, **kwargs)
 
-def process_audio_files_inference(filename, dirpath, mode):
+def process_audio_files_inference(
+    filename, dirpath, mode, normalize=False
+):
     if type(filename) is tuple:
         filename = os.path.join(*filename)
     elif type(filename) == np.ndarray:
@@ -803,6 +805,10 @@ def process_audio_files_inference(filename, dirpath, mode):
     path = os.path.join(dirpath, filename)
 
     audio_array, sample_rate = librosa.load(path, sr=16000)
+    if normalize:
+        rms = np.sqrt(np.mean(audio_array ** 2))
+        audio_array /= rms
+
     trim_audio_array, index = librosa.effects.trim(audio_array)
     mel_spec_array = melspectrogram(
         trim_audio_array, hparams=hparams
@@ -864,8 +870,8 @@ def get_frames(filename, dirpath=''):
 
 def preprocess_from_filenames(
     filenames, dirpath, mode, use_parallel=True,
-    show_pbar=True, num_cores=None, func=process_audio_files_inference,
-    cache=None, cache_threshold=30
+    show_pbar=True, num_cores=None, func=process,
+    cache=None, cache_threshold=30, normalize=False
 ):
     if show_pbar:
         iterable = tqdm(range(len(filenames)))
@@ -895,7 +901,7 @@ def preprocess_from_filenames(
                 file_mode = mode
 
             delayed_func = delayed(func)
-            args = (filename, dirpath, file_mode)
+            args = (filename, dirpath, file_mode, normalize)
 
             if args in cache:
                 data = cache[args]
@@ -921,7 +927,7 @@ def preprocess_from_filenames(
             else:
                 file_mode = mode
 
-            args = (filename, dirpath, file_mode)
+            args = (filename, dirpath, file_mode, normalize)
             if args in cache:
                 data = self.cache[args]
                 preproc_list.append(data)

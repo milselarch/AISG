@@ -2,7 +2,8 @@ from trainer import Trainer
 
 trainer = Trainer(
     cache_threshold=20, use_batch_norm=True,
-    add_aisg=True, use_avs=False, train_version=1
+    add_aisg=True, use_avs=False, train_version=1,
+    normalize_audio=True
 )
 
 trainer.train(
