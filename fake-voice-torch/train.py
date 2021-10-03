@@ -2,7 +2,7 @@ from trainer import Trainer
 
 trainer = Trainer(
     cache_threshold=20, use_batch_norm=True,
-    add_aisg=False, use_avs=True, train_version=2
+    add_aisg=False, use_avs=True, train_version=1
 )
 
 trainer.train(

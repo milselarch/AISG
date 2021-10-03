@@ -93,9 +93,10 @@ class Trainer(BaseTrainer):
         if load_dataset:
             self.load_dataset(self.add_aisg)
 
-    def load_model(self, model_path):
+    def load_model(self, model_path, eval_mode=True):
         self.model.load_state_dict(torch.load(model_path))
-        self.model.eval()
+        if eval_mode:
+            self.model.eval()
 
     def load_dataset(self, add_aisg):
         self.audio_labels = {}
@@ -370,7 +371,7 @@ class Trainer(BaseTrainer):
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
             target_lengths=target_lengths,
-            is_training=True
+            is_training=True, randomize=False
         )
 
         torch_batch_x = torch.tensor(batch_x).to(self.device)
@@ -402,7 +403,7 @@ class Trainer(BaseTrainer):
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
             target_lengths=target_lengths,
-            is_training=False, randomize=True
+            is_training=False, randomize=False
         )
 
         torch_batch_x = torch.tensor(batch_x).to(self.device)
@@ -451,7 +452,7 @@ class Trainer(BaseTrainer):
 
     def prepare_batch(
         self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
-        is_training=True, randomize=True
+        is_training=True, randomize=False
     ):
         # why does randomizing filenames not work?
         # start = time.perf_counter()
