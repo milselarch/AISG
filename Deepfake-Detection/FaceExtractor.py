@@ -77,7 +77,7 @@ class Area(object):
 
 
 class FaceExtractor(object):
-    def __init__(self):
+    def __init__(self, scale_down=1):
         dt = datetime.datetime.now()
         self.stamp = dt.strftime('%Y%m%d-%H%M%S')
         dataset = datasets.Dataset(basedir='../datasets')
@@ -92,7 +92,7 @@ class FaceExtractor(object):
         # self.num_videos = len(self.dataset.all_videos)
         # num_videos = 10
 
-        self.scale_down = 2
+        self.scale_down = scale_down
         self.every_n_frames = 20
         self.n = self.every_n_frames
         self.cuda = True
@@ -213,16 +213,63 @@ class FaceExtractor(object):
                     face_frame_list.append(max_overlap_row)
                     # excluded_faces.append(face_no)
                     excluded_indexes.append(max_overlap_index)
-                else:
-                    assert closest_row is not None
+                elif closest_row is not None:
                     face_frame_list.append(closest_row)
                     # excluded_faces.append(face_no)
                     excluded_indexes.append(closest_index)
 
         return face_frames
 
+    def export_face_frames(
+        self, face_frames, num_faces, rescale_ratios,
+        np_frames, base_dir
+    ):
+        for face_no in range(num_faces):
+            #  print(f'FRAME NO {i} {np_frames.shape}')
+            face_rows = face_frames[face_no]
+
+            # print('rows', face_rows)
+
+            for i, row in enumerate(face_rows):
+                frame_no = row['frames']
+                index = frame_no // self.every_n_frames
+                frane = np_frames[index]
+                # print('ROW', row)
+
+                top, left, right, bottom = self.extract_coords(
+                    i, face_rows, self.every_n_frames
+                )
+
+                if top == float('inf'):
+                    continue
+
+                area = (bottom - top) * (right - left)
+                area_root = area ** 0.5
+                buffer = int(area_root // 7)
+
+                rescale = self.rescale
+                b_top = int(rescale * max(top - buffer, 0))
+                b_left = int(rescale * max(left - buffer, 0))
+                b_right = int(rescale * (right + buffer))
+                b_bottom = int(rescale * (bottom + buffer))
+
+                face_crop = frane[b_top:b_bottom, b_left:b_right]
+
+                if rescale_ratios is not None:
+                    x_scale, y_scale = rescale_ratios
+                    new_width = int(face_crop.shape[1] * x_scale)
+                    new_height = int(face_crop.shape[0] * y_scale)
+                    face_crop = cv2.resize(
+                        face_crop, (new_width, new_height)
+                    )
+
+                im = Image.fromarray(face_crop)
+                path = f'{base_dir}/{face_no}-{frame_no}.jpg'
+                im.save(path)
+
     def extract_faces(
-        self, filenames=None, export_dir='../datasets-local/faces'
+        self, filenames=None, export_dir='../datasets-local/faces',
+        pre_resize=False
     ):
         if filenames is None:
             filenames = self.dataset.all_videos
@@ -251,7 +298,12 @@ class FaceExtractor(object):
                 print(f'VALUE ERROR {filename} {k}')
                 raise e
 
-            vid_obj = vid_obj.auto_resize()
+            if pre_resize:
+                vid_obj = vid_obj.auto_resize()
+                rescale_ratios = None
+            else:
+                rescale_ratios = vid_obj.get_rescale_ratios()
+
             np_frames = vid_obj.out_video
             num_frames = len(np_frames)
             video_frame_rows = self.base_faces[
@@ -262,7 +314,6 @@ class FaceExtractor(object):
             # print('FRAMES', frames_column)
             # print(240 in frames_column)
 
-            excluded_face_nos = []
             num_faces = video_frame_rows['num_faces'].to_numpy()[0]
             face_frames = self.collate_faces(
                 video_frame_rows, num_faces
@@ -289,43 +340,10 @@ class FaceExtractor(object):
                 for k in range(num_faces)
             }
 
-            face_frames = sorted_face_frames
-            for face_no in range(num_faces):
-                #  print(f'FRAME NO {i} {np_frames.shape}')
-                face_rows = face_frames[face_no]
-
-                # print('rows', face_rows)
-
-                for i, row in enumerate(face_rows):
-                    if face_no in excluded_face_nos:
-                        continue
-
-                    frame_no = row['frames']
-                    index = frame_no // self.every_n_frames
-                    frane = np_frames[index]
-                    # print('ROW', row)
-
-                    top, left, right, bottom = self.extract_coords(
-                        i, face_rows, self.every_n_frames
-                    )
-
-                    if top == float('inf'):
-                        continue
-
-                    area = (bottom - top) * (right - left)
-                    area_root = area ** 0.5
-                    buffer = int(area_root // 7)
-
-                    rescale = self.rescale
-                    b_top = int(rescale * max(top - buffer, 0))
-                    b_left = int(rescale * max(left - buffer, 0))
-                    b_right = int(rescale * (right + buffer))
-                    b_bottom = int(rescale * (bottom + buffer))
-
-                    face_crop = frane[b_top:b_bottom, b_left:b_right]
-                    im = Image.fromarray(face_crop)
-                    path = f'{base_dir}/{face_no}-{frame_no}.jpg'
-                    im.save(path)
+            self.export_face_frames(
+                sorted_face_frames, num_faces,
+                rescale_ratios, np_frames, base_dir
+            )
 
         # base_faces.to_csv(output_path, index=False)
         # print(f'SAVED TO {output_path}')

@@ -54,6 +54,14 @@ class VideoArray(object):
 
         return face_images
 
+    def get_rescale_ratios(self, *args, **kwargs):
+        coords = self.cut_blackout(self.out_video, *args, **kwargs)
+        x_start, x_end, y_start, y_end = coords
+
+        x_scale = self.width / (x_end - x_start)
+        y_scale = self.height / (y_end - y_start)
+        return x_scale, y_scale
+
     def auto_resize(self, *args, **kwargs):
         resolution = (self.width, self.height)
         coords = self.cut_blackout(self.out_video, *args, **kwargs)
