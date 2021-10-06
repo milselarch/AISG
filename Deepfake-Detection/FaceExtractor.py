@@ -275,15 +275,13 @@ class FaceExtractor(object):
             filenames = self.dataset.all_videos
 
         pbar = tqdm(range(len(filenames)))
+        faceless_videos = []
 
         for k in pbar:
             filename = filenames[k]
             name = filename[:filename.index('.')]
             base_dir = f'{export_dir}/{name}'
             pbar.set_description(f"Processing {filename}")
-
-            if not os.path.exists(base_dir):
-                os.mkdir(base_dir)
 
             try:
                 vid_obj = self.dataset.read_video(
@@ -305,10 +303,17 @@ class FaceExtractor(object):
                 rescale_ratios = vid_obj.get_rescale_ratios()
 
             np_frames = vid_obj.out_video
-            num_frames = len(np_frames)
             video_frame_rows = self.base_faces[
                 self.base_faces['filename'] == filename
             ]
+
+            if len(video_frame_rows) == 0:
+                print(f'FACELESS VIDEO: {filename}')
+                faceless_videos.append(filename)
+                continue
+
+            if not os.path.exists(base_dir):
+                os.mkdir(base_dir)
 
             # print('FRAME ROWS', video_frame_rows)
             # print('FRAMES', frames_column)
@@ -348,3 +353,4 @@ class FaceExtractor(object):
         # base_faces.to_csv(output_path, index=False)
         # print(f'SAVED TO {output_path}')
         print(f'INVALID VIDEOS', self.invalid_videos)
+        print(f'FACELESS VIDEOS', faceless_videos)
