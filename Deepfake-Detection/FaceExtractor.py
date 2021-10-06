@@ -222,9 +222,12 @@ class FaceExtractor(object):
 
     def export_face_frames(
         self, face_frames, num_faces, rescale_ratios,
-        np_frames, base_dir
+        np_frames, base_dir, excluded_faces=()
     ):
         for face_no in range(num_faces):
+            if face_no in excluded_faces:
+                continue
+
             #  print(f'FRAME NO {i} {np_frames.shape}')
             face_rows = face_frames[face_no]
 
@@ -266,6 +269,33 @@ class FaceExtractor(object):
                 im = Image.fromarray(face_crop)
                 path = f'{base_dir}/{face_no}-{frame_no}.jpg'
                 im.save(path)
+
+    @staticmethod
+    def exclude_faces(sorted_face_frames, min_frames=5):
+        num_faces = len(sorted_face_frames)
+        face_nos = tuple(sorted_face_frames.keys())
+        excluded_faces = []
+
+        for face_no in face_nos:
+            if len(sorted_face_frames) == 1:
+                break
+
+            frames = sorted_face_frames[face_no]
+            if len(frames) < min_frames:
+                excluded_faces.append(face_no)
+
+        if len(excluded_faces) == num_faces:
+            best_index, max_frames = 0, float('-inf')
+
+            for k, face_no in enumerate(face_nos):
+                frames = sorted_face_frames[face_no]
+                if len(frames) > max_frames:
+                    max_frames = len(frames)
+                    best_index = k
+
+            del excluded_faces[best_index]
+
+        return excluded_faces
 
     def extract_faces(
         self, filenames=None, export_dir='../datasets-local/faces',
@@ -324,14 +354,6 @@ class FaceExtractor(object):
                 video_frame_rows, num_faces
             )
 
-            for face_no in tuple(face_frames.keys()):
-                if len(face_frames) == 1:
-                    break
-
-                frames = face_frames[face_no]
-                if len(frames) < 5:
-                    del face_frames[face_no]
-
             left_positions = []
             for face_no in tuple(face_frames.keys()):
                 left_positions.append(
@@ -345,9 +367,11 @@ class FaceExtractor(object):
                 for k in range(num_faces)
             }
 
+            excluded_faces = self.exclude_faces(sorted_face_frames)
+
             self.export_face_frames(
-                sorted_face_frames, num_faces,
-                rescale_ratios, np_frames, base_dir
+                sorted_face_frames, num_faces, rescale_ratios,
+                np_frames, base_dir, excluded_faces=excluded_faces
             )
 
         # base_faces.to_csv(output_path, index=False)

@@ -6,8 +6,8 @@ from FaceExtractor import FaceExtractor
 
 extractor = FaceExtractor(scale_down=1)
 extractor.extract_faces(
-    filenames=['8475c38b094dee14.mp4'],
+    filenames=['61ba23efc5776bf5.mp4'],
     export_dir='faces', pre_resize=False
 )
 
-# extractor.extract_faces(pre_resize=False)
+extractor.extract_faces(pre_resize=False)
