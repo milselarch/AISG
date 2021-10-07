@@ -5,7 +5,7 @@ import cv2
 import sys
 import os
 
-sys.path.append('..')
+sys.path.append('')
 
 from matplotlib import pyplot as plt
 from loader import load_video
@@ -14,13 +14,15 @@ from PIL import Image
 scale = 0.25
 print(os.getcwd())
 cwd = os.getcwd()
-base_dir = f'{cwd}/../datasets/train/videos'
+base_dir = f'datasets/train/videos'
 
-real = '8e23c73ba7e2848a.mp4'
+# real = '8e23c73ba7e2848a.mp4'
 # real = '4ba3229f76ac5cea.mp4'
-fake = '4ef85974dc0584ad.mp4'
+# fake = '4ef85974dc0584ad.mp4'
+fake = '4e8fbf6e91f4b48f.mp4'
+real = '6100058cc8ffc0fd.mp4'
 
-detect_path = '../stats/detections-20210926-112918.csv'
+detect_path = 'stats/detections-20210926-112918.csv'
 detect_df = pd.read_csv(detect_path)
 cond = detect_df['filename'] == real
 frame_data = detect_df[cond].iloc[0]
@@ -58,6 +60,9 @@ real_video = load_video(real_video, specific_frames=[20], scale=scale)
 image_fake = fake_video.out_video[0]
 image_real = real_video.out_video[0]
 face_crop = image_real[top:bottom, left:right]
+
+plt.imshow(image_fake)
+plt.show()
 
 plt.imshow(face_crop, interpolation='nearest')
 plt.show()

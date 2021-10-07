@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-from utils import hparams
 from trainer import Trainer
 from tqdm.auto import tqdm
 from scipy import stats
@@ -14,7 +13,7 @@ class AudioAnalysis(object):
     def __init__(
         self, labels_path='../datasets/extra-labels.csv',
         audio_dir='../datasets-local/audios-flac', audio_ext='flac',
-        durations_path = 'csvs/aisg-durations-210929-0931.csv',
+        durations_path='csvs/aisg-durations-210929-0931.csv',
         clip_start=160, clip_length=80
     ):
         self.cache = {}

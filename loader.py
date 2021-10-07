@@ -198,9 +198,9 @@ class VideoArray(object):
 
 def load_video(
     cap, every_n_frames=None, specific_frames=None,
-    to_rgb=True, scale=None, inc_pil=False,
+    to_rgb=True, scale=1, inc_pil=False,
     max_frames=None, release=True, filename=None,
-    verbose=False
+    verbose=False, early_stop=True
 ):
     """
     Loads a video.
@@ -258,7 +258,12 @@ def load_video(
     frame_no = 0
     ret = True
 
+    last_needed_frame = max(specific_frames)
+
     while i_frame_in < n_frames_in and ret:
+        if early_stop and (i_frame_in > last_needed_frame):
+            break
+
         try:
             try:
                 if every_n_frames == 1:
