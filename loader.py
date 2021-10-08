@@ -2,6 +2,55 @@ import cv2
 import numpy as np
 import pandas as pd
 
+class BoundingBox(object):
+    def __init__(self, x_start, x_end, y_start, y_end):
+        self.x_start = x_start
+        self.x_end = x_end
+        self.y_start = y_start
+        self.y_end = y_end
+
+    def to_tuple(self):
+        return (
+            self.x_start, self.x_end,
+            self.y_start, self.y_end
+        )
+
+    def __index__(self, k):
+        return self.to_tuple()[k]
+
+    def __repr__(self):
+        name = self.__class__.__name__
+        args = ', '.join([
+            repr(arg) for arg in self.to_tuple()
+        ])
+
+        return f'{name}({args})'
+
+    @staticmethod
+    def rescale_coord(coord, new_start, new_end, end):
+        new_coord = end * (coord - new_start) / (new_end - new_start)
+        new_coord = int(max(min(new_coord, end), 0))
+        return new_coord
+
+    def rescale_x(self, x, width):
+        return self.rescale_coord(
+            x, self.x_start, self.x_end, width
+        )
+
+    def rescale_y(self, y, height):
+        return self.rescale_coord(
+            y, self.y_start, self.y_end, height
+        )
+
+    def rescale(self, x, y, image):
+        height = image.shape[0]
+        width = image.shape[1]
+
+        new_x = self.rescale_coord(x, self.x_start, self.x_end, width)
+        new_y = self.rescale_coord(y, self.y_start, self.y_end, height)
+        return new_x, new_y
+
+
 class VideoArray(object):
     def __init__(
         self, out_video, width, height, frames,
@@ -56,7 +105,7 @@ class VideoArray(object):
 
     def get_rescale_ratios(self, *args, **kwargs):
         coords = self.cut_blackout(self.out_video, *args, **kwargs)
-        x_start, x_end, y_start, y_end = coords
+        x_start, x_end, y_start, y_end = coords.to_tuple()
 
         x_scale = self.width / (x_end - x_start)
         y_scale = self.height / (y_end - y_start)
@@ -65,7 +114,7 @@ class VideoArray(object):
     def auto_resize(self, *args, **kwargs):
         resolution = (self.width, self.height)
         coords = self.cut_blackout(self.out_video, *args, **kwargs)
-        x_start, x_end, y_start, y_end = coords
+        x_start, x_end, y_start, y_end = coords.to_tuple()
         print(f'COORDS {coords}')
         resized_frames = []
 
@@ -95,10 +144,15 @@ class VideoArray(object):
 
         for k in range(samples):
             interval = sample_interval * k
-            print(f'INTERVAL {interval} {images.shape}')
+            # print(f'INTERVAL {interval} {images.shape}')
             frame = images[interval]
 
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if len(frame.shape) == 3:
+                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                assert len(frame.shape) == 2
+                gray_frame = frame
+
             _, binary_frame = cv2.threshold(
                 gray_frame, 1, 255, cv2.THRESH_BINARY
             )
@@ -119,7 +173,8 @@ class VideoArray(object):
         x_end = int(np.median(x_ends))
         y_start = int(np.median(y_starts))
         y_end = int(np.median(y_ends))
-        return x_start, x_end, y_start, y_end
+
+        return BoundingBox(x_start, x_end, y_start, y_end)
 
     @classmethod
     def h_clip(cls, *args, **kwargs):

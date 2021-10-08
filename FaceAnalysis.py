@@ -15,11 +15,15 @@ class FaceCluster(object):
     def __init__(
         self, labels_path='../datasets/extra-labels.csv',
         durations_path='stats/aisg-durations-210929-0931.csv',
+        cluster_path='stats/bg-clusters/cluster-211008-0015.csv'
     ):
         self.cache = {}
         self.labels_path = labels_path
         self.durations_path = durations_path
         self.stamp = self.make_date_stamp()
+
+        self.cluster_path = cluster_path
+        # self.cluster_df = pd.read_csv(cluster_path)
 
         self.video_basedir = 'datasets/train/videos'
         self.base_filename = "detections-20210903-230613.csv"
@@ -90,12 +94,15 @@ class FaceCluster(object):
             scale=scale
         )
 
+        bounding_box = video_obj.cut_blackout()
         frame = video_obj.out_video[0]
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        result = (gray_frame, bounding_box)
 
         if cache:
-            self.cache[name] = frame
+            self.cache[name] = result
 
-        return frame
+        return result
 
     def get_start_frame_no(self, filename):
         video_frame_rows = self.base_faces[
@@ -168,7 +175,11 @@ class FaceCluster(object):
             face_crop_hash = imagehash.phash(pil_face_img)
             total_face_hash += str(face_crop_hash)
 
-            image[top:bottom, left:right, :] = 0
+            if len(image.shape) == 3:
+                image[top:bottom, left:right, :] = 0
+            else:
+                assert len(image.shape) == 2
+                image[top:bottom, left:right] = 0
 
         # image = cls.threshold(image)
         pil_bg_image = Image.fromarray(image)
@@ -179,7 +190,7 @@ class FaceCluster(object):
         self.cache = {}
 
     def make_background_clusters(
-        self, files, pbar, scale=1, threshold=6
+        self, files, pbar=None, scale=1, threshold=6
     ):
         self.clear_cache()
         clusters = []
@@ -197,14 +208,21 @@ class FaceCluster(object):
                 background_hashes.append([0])
                 distances.append([0])
                 face_hashes.append([0])
+                files = files[1:]
                 continue
 
-            base_image = self.resolve(
+            raw_image, base_bounds = self.resolve(
                 base_filename, frame_no, scale=scale
             )
-            face_areas = self.get_face_areas(
+            raw_face_areas = self.get_face_areas(
                 base_filename, frame_no, scale=scale
             )
+
+            base_image = self.resize_frame(raw_image, base_bounds)
+            face_areas = self.resize_face_areas(
+                base_image, base_bounds, raw_face_areas
+            )
+
             base_bg_hash, base_face_hash = self.make_hashes(
                 base_image, face_areas
             )
@@ -213,15 +231,20 @@ class FaceCluster(object):
             background_hash_batch = [base_bg_hash]
             cluster = [base_filename]
             distance_batch = [0]
-            pbar.update()
+
+            if pbar is not None:
+                pbar.update()
 
             for filename in files[1:]:
-                image = self.resolve(filename, frame_no)
+                image, image_bounds = self.resolve(
+                    filename, frame_no
+                )
 
                 if image.shape != base_image.shape:
                     new_files.append(filename)
                     continue
 
+                image = self.resize_frame(image, image_bounds)
                 bg_hash, face_hash = self.make_hashes(
                     image, face_areas
                 )
@@ -234,7 +257,9 @@ class FaceCluster(object):
                     background_hash_batch.append(bg_hash)
                     face_hash_batch.append(face_hash)
                     distance_batch.append(distance)
-                    pbar.update()
+
+                    if pbar is not None:
+                        pbar.update()
 
             clusters.append(cluster)
             distances.append(distance_batch)
@@ -313,3 +338,67 @@ class FaceCluster(object):
         cluster_df.to_csv(path, index=False)
         print(f'clusters saved at {path}')
         return cluster_df
+
+    @staticmethod
+    def resize_face_areas(image, bounds, face_areas):
+        new_face_areas = []
+        height = image.shape[0]
+        width = image.shape[1]
+
+        for face_area in face_areas:
+            top, left, right, bottom = face_area
+            new_face_areas.append((
+                bounds.rescale_y(top, height),
+                bounds.rescale_x(left, width),
+                bounds.rescale_x(right, width),
+                bounds.rescale_y(bottom, height)
+            ))
+
+        return tuple(new_face_areas)
+
+    @staticmethod
+    def resize_frame(frame, bounding_box):
+        x_start, x_end, y_start, y_end = bounding_box.to_tuple()
+        cropped_frame = frame[y_start:y_end, x_start:x_end]
+
+        pil_image = Image.fromarray(cropped_frame)
+        resized_frame = pil_image.resize(
+            frame.shape[::-1], Image.BICUBIC
+        )
+
+        resized_frame = np.array(resized_frame)
+        assert resized_frame.shape == frame.shape
+        return resized_frame
+
+    def get_clusters_info(self):
+        cluster_df = pd.read_csv(self.cluster_path)
+        cluster_nos = cluster_df['cluster'].to_numpy()
+        cluster_nos = np.unique(cluster_nos)
+
+        real_clusters, fake_clusters = {}, {}
+        mixed_clusters = {}
+
+        for cluster_no in cluster_nos:
+            cluster_rows = cluster_df[
+                cluster_df['cluster'] == cluster_no
+            ]
+
+            labels = cluster_rows['label'].to_numpy()
+            real_only = max(labels) == 0
+            fake_only = min(labels) == 1
+
+            if real_only:
+                real_clusters[cluster_no] = cluster_rows
+            elif fake_only:
+                fake_clusters[cluster_no] = cluster_rows
+            else:
+                mixed_clusters[cluster_no] = cluster_rows
+
+        print(cluster_df)
+
+        print('REAL CLUSTERS', len(real_clusters))
+        print('FAKE CLUSTERS', len(fake_clusters))
+        print('MIXED CLUSTERS', len(mixed_clusters))
+        print('END')
+
+        return real_clusters, fake_clusters, mixed_clusters
