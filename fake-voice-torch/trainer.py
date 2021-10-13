@@ -435,7 +435,9 @@ class Trainer(BaseTrainer):
         if type(batch_x) in (list, tuple):
             assert type(batch_x[0]) is str
             labels = [1] * len(batch_x)
-            batch_x, np_labels = self.load_batch(batch_x, labels)
+            batch_x, np_labels = self.load_batch(
+                batch_x, labels, cache=False
+            )
 
         if type(batch_x) is np.ndarray:
             torch_batch_x = torch.tensor(batch_x).to(self.device)
@@ -490,11 +492,17 @@ class Trainer(BaseTrainer):
         return batch_x, np_labels
 
     def load_batch(
-        self, batch_filepaths, batch_labels, target_lengths=None
+        self, batch_filepaths, batch_labels, target_lengths=None,
+        cache=True
     ):
+        if cache is True:
+            cache = self.cache
+        elif cache is False:
+            cache = {}
+
         process_batch = utils.preprocess_from_filenames(
             batch_filepaths, '', batch_labels, use_parallel=True,
-            num_cores=4, show_pbar=False, cache=self.cache,
+            num_cores=4, show_pbar=False, cache=cache,
             cache_threshold=self.cache_threshold,
             normalize=self.normalize_audio
         )

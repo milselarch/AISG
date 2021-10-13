@@ -18,8 +18,14 @@ print(df)
 # print('FILENAMES', filenames)
 # input('>>> ')
 
-trainer = Trainer(cache_threshold=20, load_dataset=False)
-path = './saves/checkpoints/210928-1400/E35392_T0.86_V0.68.pt'
+trainer = Trainer(
+    cache_threshold=20, load_dataset=False,
+    use_batch_norm=True,
+    add_aisg=False, use_avs=True, train_version=1
+)
+
+stamp = trainer.make_date_stamp()
+path = './saves/models/211002-1735.pt'
 trainer.load_model(path)
 
 real_test_names = open('aisg-test.txt').read().split('\n')
@@ -32,6 +38,10 @@ df['group_pred'] = 0.5
 
 test_files = [f'{filename}.mp4' for filename in real_test_names]
 # eval_files = filenames[10:20] + test_files[0:10]
+# clusters saved at stats/bg-clusters/cross-clusters-211009-0222.csv
+# 3495/6943 f859740cb40dcd73.mp4
+# eval_files = filenames[3945:]
+# eval_files = ['f859740cb40dcd73.mp4']
 eval_files = filenames
 
 # print('EVAL', eval_files)
@@ -76,5 +86,7 @@ for filename in pbar:
     df.loc[cond, 'group_pred'] = group_pred
     print(df.loc[cond])
 
-df.to_csv('csvs/aisg-preds.csv', index=False)
+path = f'csvs/aisg-preds-{stamp}.csv'
+df.to_csv(path, index=False)
 print('INVALID PATHS', invalid)
+print(f'evaluations saved at {path}')

@@ -15,7 +15,8 @@ class FaceCluster(object):
     def __init__(
         self, labels_path='../datasets/extra-labels.csv',
         durations_path='stats/aisg-durations-210929-0931.csv',
-        cluster_path='stats/bg-clusters/cluster-211008-0015.csv'
+        # cluster_path='stats/bg-clusters/cluster-211008-0015.csv'
+        cluster_path='stats/bg-clusters/cluster-211008-1233.csv'
     ):
         self.cache = {}
         self.labels_path = labels_path
@@ -211,18 +212,8 @@ class FaceCluster(object):
                 files = files[1:]
                 continue
 
-            raw_image, base_bounds = self.resolve(
-                base_filename, frame_no, scale=scale
-            )
-            raw_face_areas = self.get_face_areas(
-                base_filename, frame_no, scale=scale
-            )
-
-            base_image = self.resize_frame(raw_image, base_bounds)
-            face_areas = self.resize_face_areas(
-                base_image, base_bounds, raw_face_areas
-            )
-
+            result = self.extract(base_filename, frame_no, scale)
+            base_image, face_areas = result
             base_bg_hash, base_face_hash = self.make_hashes(
                 base_image, face_areas
             )
@@ -245,9 +236,7 @@ class FaceCluster(object):
                     continue
 
                 image = self.resize_frame(image, image_bounds)
-                bg_hash, face_hash = self.make_hashes(
-                    image, face_areas
-                )
+                hashes = self.make_hashes(image, face_areas)
                 distance = base_bg_hash - bg_hash
 
                 if distance > threshold:
@@ -370,7 +359,22 @@ class FaceCluster(object):
         assert resized_frame.shape == frame.shape
         return resized_frame
 
-    def get_clusters_info(self):
+    def extract(self, base_filename, frame_no, scale=1):
+        raw_image, base_bounds = self.resolve(
+            base_filename, frame_no, scale=scale
+        )
+        raw_face_areas = self.get_face_areas(
+            base_filename, frame_no, scale=scale
+        )
+
+        base_image = self.resize_frame(raw_image, base_bounds)
+        face_areas = self.resize_face_areas(
+            base_image, base_bounds, raw_face_areas
+        )
+
+        return base_image, face_areas
+
+    def get_clusters_info(self, verbose=True):
         cluster_df = pd.read_csv(self.cluster_path)
         cluster_nos = cluster_df['cluster'].to_numpy()
         cluster_nos = np.unique(cluster_nos)
@@ -394,11 +398,128 @@ class FaceCluster(object):
             else:
                 mixed_clusters[cluster_no] = cluster_rows
 
-        print(cluster_df)
-
-        print('REAL CLUSTERS', len(real_clusters))
-        print('FAKE CLUSTERS', len(fake_clusters))
-        print('MIXED CLUSTERS', len(mixed_clusters))
-        print('END')
+        if verbose:
+            print(cluster_df)
+            print('REAL CLUSTERS', len(real_clusters))
+            print('FAKE CLUSTERS', len(fake_clusters))
+            print('MIXED CLUSTERS', len(mixed_clusters))
+            print('END')
 
         return real_clusters, fake_clusters, mixed_clusters
+
+    def cross_clusters(self, num_clusters=None, scale=1):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real_clusters, fake_clusters, mixed_clusters = cluster_groups
+        sub_real_clusters = {**real_clusters, **mixed_clusters}
+        cluster_log, nearest_distance_log = [], []
+        nearest_file_log, nearest_cluster_log = [], []
+        filename_log = []
+
+        fake_cluster_nos = list(fake_clusters.keys())
+        if num_clusters is not None:
+            fake_cluster_nos = fake_cluster_nos[:num_clusters]
+
+        pbar = tqdm(fake_cluster_nos)
+
+        for fake_cluster_no in pbar:
+            fake_cluster = fake_clusters[fake_cluster_no]
+            row = fake_cluster.loc[fake_cluster.index[0]]
+            base_filename = row['filename']
+            frame_no = self.get_start_frame_no(base_filename)
+            # cluster_log.append(fake_cluster_no)
+
+            if frame_no is None:
+                cluster_log.append(fake_cluster_no)
+                filename_log.append(base_filename)
+                nearest_distance_log.append(-1)
+                nearest_cluster_log.append([])
+                nearest_file_log.append([])
+                continue
+
+            result = self.extract(base_filename, frame_no, scale)
+            base_image, base_face_areas = result
+            base_bg_hash, base_face_hash = self.make_hashes(
+                base_image, base_face_areas
+            )
+
+            nearest_clusters = []
+            nearest_filenames = []
+            closest_distance = float('inf')
+
+            for i, real_cluster_no in enumerate(sub_real_clusters):
+                real_cluster = sub_real_clusters[real_cluster_no]
+                str_hash = real_cluster['bg_hash'].to_numpy()[0]
+                assert type(str_hash) == str
+                """
+                if str_hash == '0':
+                    # video with no faces detected
+                    continue
+                """
+                row = None
+                for index in real_cluster.index:
+                    row = real_cluster.loc[index]
+                    if row['label'] == 0:
+                        break
+
+                assert row is not None
+                assert row['label'] == 0
+                filename = row['filename']
+
+                try:
+                    result = self.extract(filename, frame_no, scale)
+                except datasets.FailedVideoRead:
+                    continue
+
+                image, face_areas = result
+                if base_image.shape != image.shape:
+                    continue
+                """
+                if face_areas is None:
+                    continue
+                """
+                hashes = self.make_hashes(image, base_face_areas)
+                bg_hash, face_hash = hashes
+                distance = bg_hash - base_bg_hash
+
+                if distance < closest_distance:
+                    nearest_clusters = [real_cluster_no]
+                    nearest_filenames = [filename]
+                    closest_distance = distance
+                elif distance == closest_distance:
+                    nearest_clusters.append(real_cluster_no)
+                    nearest_filenames.append(filename)
+
+                length = len(sub_real_clusters)
+                file_pair = f'{base_filename} {filename}'
+                distance_pair = f'[{distance}][{closest_distance}]'
+                sub_progress = f'[{i}/{length}]'
+
+                desc = f'{file_pair} {sub_progress} {distance_pair}'
+                pbar.set_description(desc)
+
+            filename_log.append(base_filename)
+            cluster_log.append(fake_cluster_no)
+            nearest_distance_log.append(closest_distance)
+            nearest_cluster_log.append(nearest_clusters)
+            nearest_file_log.append(nearest_filenames)
+
+        basedir = f'stats/bg-clusters'
+        path = f'{basedir}/cross-clusters-{self.stamp}.csv'
+        cluster_df = pd.DataFrame(data={
+            'cluster': cluster_log, 'filename': filename_log,
+            'nearest_distance': nearest_distance_log,
+            'nearest_clusters': nearest_cluster_log,
+            'nearest_files': nearest_file_log
+        })
+
+        cluster_df.to_csv(path, index=False)
+        print(f'clusters saved at {path}')
+        return cluster_df
+
+
+
+
+
+
+
+

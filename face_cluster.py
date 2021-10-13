@@ -10,11 +10,14 @@ files = [
     'fe17857f491c29d2.mp4'
 ]
 
+"""
 result = clusterizer.make_background_clusters(files)
 clusters, distances, background_hashes, face_hashes = result
 print(clusters, distances)
+"""
 
-clusterizer.cluster()
+# clusterizer.cluster()
 # clusterizer.get_clusters_info()
+clusterizer.cross_clusters()
 
 print('DONE')
