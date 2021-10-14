@@ -1,8 +1,11 @@
+import ast
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import datasets
 import imagehash
+import loader
 import cv2
 import os
 
@@ -516,10 +519,136 @@ class FaceCluster(object):
         print(f'clusters saved at {path}')
         return cluster_df
 
+    @staticmethod
+    def thumbnail_videos(cluster_no, filenames):
+        plt.cla()
+        pbar = tqdm(range(len(filenames)))
 
+        plt.title(cluster_no)
+        plt.show()
 
+        for k in pbar:
+            filename = filenames[k]
+            pbar.set_description(filename)
+            path = f'datasets/train/videos/{filename}'
+            out = loader.load_video(path, specific_frames=[20])
+            plt.title(f'[{k}][{cluster_no}]  {filename}')
+            plt.imshow(out.out_video[0])
+            plt.show()
 
+    @staticmethod
+    def diff_faces(face_hashes):
+        diffs = []
+        base_hash = face_hashes[0]
+        lengths = set([len(f) for f in face_hashes])
+        if len(lengths) != 1:
+            return
 
+        for face_hash in face_hashes:
+            diff_hash = ''
 
+            for k, char in enumerate(base_hash):
+                diff_hash += str(int(char == face_hash[k]))
 
+            diffs.append(diff_hash)
 
+        return diffs
+
+    def manual_grade_cross(self, skip=True):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed = cluster_groups
+        clusters = {**real, **fake, **mixed}
+
+        csv_name = 'cross-clusters-labelled.csv'
+        cross_path = f'stats/bg-clusters/{csv_name}'
+        cross_df = pd.read_csv(cross_path)
+        indexes = cross_df.index
+        k = 0
+
+        while k < len(indexes):
+            index = indexes[k]
+            row = cross_df.loc[index]
+            cluster_no = row['cluster']
+            distance = row['nearest_distance']
+
+            if skip and not np.isnan(row['match']):
+                k += 1
+                continue
+
+            if distance == -1:
+                print(f'skipping cluster {cluster_no}')
+                k += 1
+                continue
+
+            cluster = clusters[cluster_no]
+            cluster_filenames = cluster['filename'].to_numpy()
+            cluster_labels = cluster['label'].to_numpy()
+            cluster_faces = cluster['face_hash'].to_numpy()
+            cluster_diffs = self.diff_faces(cluster_faces)
+            name_labels = list(zip(
+                cluster_filenames, cluster_labels
+            ))
+
+            nearest_clusters = row['nearest_clusters']
+            nearest_files = row['nearest_files']
+            nearest_files = ast.literal_eval(nearest_files)
+
+            if len(nearest_files) < 11:
+                self.thumbnail_videos(cluster_no, nearest_files)
+            else:
+                print(f'{len(nearest_files)} nearest filenames')
+
+            fake_filename = cluster_filenames[0]
+            file_path = f'datasets/train/videos/{fake_filename}'
+            os.system(f'xdg-open {file_path}')
+
+            print(f'cluster: {cluster_no}')
+            print(f'cluster filenames: {name_labels}')
+            print(f'cluster face hash: {list(cluster_faces)}')
+            print(f'cluster face diff: {cluster_diffs}')
+
+            print(f'nearest distance: {distance}')
+            print(f'nearest clusters: {nearest_clusters}')
+            print(f'nearest files: {nearest_files}')
+
+            while True:
+                try:
+                    command = input(f'[{k}]: ').strip()
+                except KeyboardInterrupt:
+                    continue
+
+                if command == 'b':
+                    # print('BREAK')
+                    k -= 2
+                    print('BREAK', k)
+                    skip = False
+                    break
+                elif command == 'n':
+                    break
+
+                if len(command) != 2:
+                    continue
+
+                if command[0] == 'm':
+                    cross_df.loc[k, 'match'] = 1
+                elif command[0] == 'u':
+                    cross_df.loc[k, 'match'] = 0
+                else:
+                    continue
+
+                if command[1] == 'f':
+                    cross_df.loc[k, 'label'] = 'F'
+                    break
+                elif command[1] == 'h':
+                    cross_df.loc[k, 'label'] = 'H'
+                    break
+                elif command[1] == 'd':
+                    cross_df.loc[k, 'label'] = 'D'
+                    break
+                elif command[1] == 'r':
+                    cross_df.loc[k, 'label'] = 'R'
+                    break
+
+            cross_df.to_csv(cross_path, index=False)
+            input('>>> ')
+            k += 1

@@ -39,7 +39,7 @@ assert scale_down >= 1
 rescale = 1 / scale_down
 
 json_filename = f'stats/face_map_stats-{scale_down}-{n}-{stamp}.json'
-csv_filename = f'stats/face_map_stats-{scale_down}-{n}-{stamp}.csv'
+csv_filename = f'stats/face_map-{scale_down}-{n}-{stamp}.csv'
 profile_path = f'stats/profile-{scale_down}-{n}-{stamp}.profile'
 
 print(f'rescale is {rescale}')
@@ -73,6 +73,7 @@ def load_video(filename, scale, n_frames):
         print('FAILED TO READ', filename)
         return
 
+    vid_obj = vid_obj.auto_resize()
     np_frames = vid_obj.out_video
     return np_frames
 

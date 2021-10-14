@@ -56,6 +56,7 @@ class AudioAnalysis(object):
     def build_duration_map(self):
         df = pd.read_csv(self.durations_path)
         filenames = df['filename'].to_numpy().tolist()
+        input(f'{len(filenames)} FILES: ')
         labels = df['label'].to_numpy()
         durations = df['duration'].to_numpy()
 
@@ -172,6 +173,7 @@ class AudioAnalysis(object):
     ):
         assert cluster_by in ('audio', 'background')
         duration_map = self.build_duration_map()
+
         num_files = sum([
             len(duration_map[duration]['real']) +
             len(duration_map[duration]['fake'])
@@ -234,8 +236,11 @@ class AudioAnalysis(object):
         print(f'clusters saved at {path}')
         return cluster_df
 
-    def evaluate_clusters(self):
-        path = 'csvs/clusters-210929-2138.csv'
+    def evaluate_clusters(self, path=None):
+        if path is None:
+            path = 'csvs/clusters-210929-2138.csv'
+            # path = 'csvs/clusters-211014-0130.csv'
+
         df = pd.read_csv(path)
         print(df)
 
@@ -404,7 +409,7 @@ class AudioAnalysis(object):
 
         return unique_filenames
 
-    def make_unique_audios(self):
+    def make_audio_labels(self, unique=True):
         cross_path = 'csvs/cross-extra-210930-1006.csv'
         cluster_path = 'csvs/clusters-210929-2138.csv'
         cluster_df = pd.read_csv(cluster_path)
@@ -413,6 +418,7 @@ class AudioAnalysis(object):
         cross_df = pd.read_csv(cross_path)
         fakes = cross_df['fake'].to_numpy().tolist()
         fake_filenames, real_filenames = [], []
+        skipped = 0
 
         for fake_filename in tqdm(fakes):
             cross_cond = cross_df['fake'] == fake_filename
@@ -421,6 +427,7 @@ class AudioAnalysis(object):
             assert not np.isnan(fake_audio)
 
             if fake_audio == 0.5:
+                skipped += 1
                 continue
 
             file_cond = cluster_df['filename'] == fake_filename
@@ -429,25 +436,33 @@ class AudioAnalysis(object):
             cluster_cond = cluster_df['cluster'] == cluster_no
             cluster = cluster_df[cluster_cond]
 
-            unique_filenames = self.unique_from_cluster(cluster)
-            print(f'filenames {len(unique_filenames)}')
+            if unique:
+                filenames = self.unique_from_cluster(cluster)
+            else:
+                filenames = list(cluster['filename'].to_numpy())
+
+            # print(f'filenames {len(filenames)}')
 
             if fake_audio == 1:
-                fake_filenames.extend(unique_filenames)
+                fake_filenames.extend(filenames)
             else:
                 assert fake_audio == 0
-                real_filenames.extend(unique_filenames)
+                real_filenames.extend(filenames)
 
         for cluster_no in tqdm(clusters):
             cond = cluster_df['cluster'] == cluster_no
             cluster = cluster_df[cond]
-            is_real = max(cluster['label']) == 0
+            has_real = min(cluster['label']) == 0
 
-            if not is_real:
+            if not has_real:
                 continue
 
-            unique_filenames = self.unique_from_cluster(cluster)
-            real_filenames.extend(unique_filenames)
+            if unique:
+                filenames = self.unique_from_cluster(cluster)
+            else:
+                filenames = list(cluster['filename'].to_numpy())
+
+            real_filenames.extend(filenames)
 
         filenames = fake_filenames + real_filenames
         labels = [1] * len(fake_filenames) + [0] * len(real_filenames)
@@ -455,7 +470,8 @@ class AudioAnalysis(object):
             'filename': filenames, 'fake_audio': labels
         })
 
-        path = f'csvs/unique-audios-{self.stamp}.csv'
+        print(f'skipped {skipped} audios')
+        path = f'csvs/audio-labels-{self.stamp}.csv'
         df.to_csv(path, index=False)
         print(f'unique audios saved to {path}')
 

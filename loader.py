@@ -115,7 +115,7 @@ class VideoArray(object):
         resolution = (self.width, self.height)
         coords = self.cut_blackout(self.out_video, *args, **kwargs)
         x_start, x_end, y_start, y_end = coords.to_tuple()
-        print(f'COORDS {coords}')
+        # print(f'COORDS {coords}')
         resized_frames = []
 
         for frame in self.out_video:
@@ -276,6 +276,9 @@ def load_video(
     )
 
     if type(cap) == str:
+        if filename is None:
+            filename = cap
+
         cap = cv2.VideoCapture(filename)
 
     n_frames_in = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
