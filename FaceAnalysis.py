@@ -652,3 +652,480 @@ class FaceCluster(object):
             cross_df.to_csv(cross_path, index=False)
             input('>>> ')
             k += 1
+
+    def sub_grade_clusters(self):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed = cluster_groups
+        clusters = {**real, **fake, **mixed}
+
+        print(f'real clusters {len(real)}')
+        print(f'fake clusters {len(fake)}')
+        print(f'mixed clusters {len(mixed)}')
+
+        csv_name = 'cross-clusters-labelled.csv'
+        cross_path = f'stats/bg-clusters/cross-clusters-labelled.csv'
+        cross_df = pd.read_csv(cross_path)
+        indexes = cross_df.index
+        k = 0
+
+        half_df = cross_df[cross_df['label'] == 'H']
+        half_clusters = half_df['cluster'].to_numpy()
+        half_filenames, cluster_nos = [], []
+        file_mapping = {}
+
+        for cluster_no in half_clusters:
+            filenames = clusters[cluster_no]['filename']
+            half_filenames.extend(filenames)
+            cluster_nos.extend([cluster_no] * len(filenames))
+
+            for filename in filenames:
+                file_mapping[filename] = cluster_no
+
+        # print(mixed_filenames, len(mixed_filenames))
+        out_csv_path = 'stats/bg-clusters/video-labels.csv'
+
+        try:
+            out_df = pd.read_csv(out_csv_path)
+        except FileNotFoundError:
+            out_df = pd.DataFrame(data={
+                'filename': half_filenames,
+                'cluster': cluster_nos,
+                'label': ['NULL'] * len(half_filenames)
+            })
+
+        index, skip, prev_cluster_no = 0, True, None
+
+        while index < len(half_filenames):
+            filename = half_filenames[index]
+            cluster_no = file_mapping[filename]
+            new_cluster = cluster_no != prev_cluster_no
+
+            row = cross_df[cross_df['cluster'] == cluster_no]
+            cond = out_df['filename'] == filename
+            # print(k, cluster_no, filename)
+
+            # print(out_df[cond]['label'], out_df[cond])
+            file_label = out_df[cond]['label'].to_numpy()[0]
+            # print([file_label, type(file_label)])
+
+            if skip and not (file_label is np.nan):
+                index += 1
+                continue
+
+            if new_cluster:
+                if prev_cluster_no is not None:
+                    input('>>> ')
+
+                prev_cluster_no = cluster_no
+
+            cluster = clusters[cluster_no]
+            cluster_filenames = cluster['filename'].to_numpy()
+            cluster_labels = cluster['label'].to_numpy()
+            nearest_files = row['nearest_files'].to_numpy()[0]
+            nearest_files = ast.literal_eval(nearest_files)
+
+            if new_cluster and (len(nearest_files) < 11):
+                self.thumbnail_videos(cluster_no, nearest_files)
+            else:
+                print(f'{len(nearest_files)} nearest filenames')
+
+            file_path = f'datasets/train/videos/{filename}'
+            os.system(f'xdg-open {file_path}')
+
+            print(f'cluster: {cluster_no}')
+            print(f'nearest files: {nearest_files}')
+            print(f'filename: {filename}')
+
+            while True:
+                try:
+                    command = input(f'[{index}]: ').strip()
+                except KeyboardInterrupt:
+                    continue
+
+                if command == 'b':
+                    index -= 2
+                    skip = False
+                    break
+                elif command == 'n':
+                    break
+
+                if command == 'f':
+                    out_df.loc[cond, 'label'] = 'F'
+                    break
+                elif command == 'h':
+                    out_df.loc[cond, 'label'] = 'H'
+                    break
+                elif command == 'd':
+                    out_df.loc[cond, 'label'] = 'D'
+                    break
+                elif command == 'r':
+                    out_df.loc[cond, 'label'] = 'R'
+                    break
+
+            out_df.to_csv(out_csv_path, index=False)
+            index += 1
+
+        """
+        while k < len(indexes):
+            index = indexes[k]
+            row = cross_df.loc[index]
+            cluster_no = row['cluster']
+            distance = row['nearest_distance']
+
+            if skip and not np.isnan(row['match']):
+                k += 1
+                continue
+            elif distance == -1:
+                print(f'skipping cluster {cluster_no}')
+                k += 1
+                continue
+        """
+
+    def auto_fill_fake_clusters(self):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed = cluster_groups
+        clusters = {**real, **fake, **mixed}
+
+        print(f'real clusters {len(real)}')
+        print(f'fake clusters {len(fake)}')
+        print(f'mixed clusters {len(mixed)}')
+
+        cross_path = f'stats/bg-clusters/cross-clusters-labelled.csv'
+        cross_df = pd.read_csv(cross_path)
+        indexes = cross_df.index
+
+        base_csv_path = 'stats/bg-clusters/video-labels.csv'
+        base_df = pd.read_csv(base_csv_path)
+        fake_filenames = []
+        cluster_log = []
+
+        for index in tqdm(indexes):
+            row = cross_df.loc[index]
+            if row['label'] != 'F':
+                continue
+
+            cluster_no = row['cluster']
+            cluster = clusters[cluster_no]
+            filenames = cluster['filename'].to_numpy()
+            cluster_log.extend([cluster_no] * len(filenames))
+            fake_filenames.extend(filenames)
+
+        fake_df = pd.DataFrame({
+            'filename': fake_filenames, 'cluster': cluster_log,
+            'label': ['F'] * len(fake_filenames)
+        })
+
+        out_path = f'stats/bg-clusters/video-labels-{self.stamp}.csv'
+        combine_df = pd.concat([base_df, fake_df], ignore_index=True)
+        combine_df.to_csv(out_path, index=False)
+        print(f'wrote video labels to {out_path}')
+
+    @staticmethod
+    def get_min_distance(face_hash, real_hashes):
+        min_distance = float('inf')
+        face_hash = int(face_hash, 16)
+
+        for real_hash in real_hashes:
+            real_hash = int(real_hash, 16)
+            mismatch = face_hash ^ real_hash
+            distance = bin(mismatch).count('1')
+
+            if distance < min_distance:
+                min_distance = distance
+
+        return min_distance
+
+    @staticmethod
+    def get_real_audio_clusters(audio_clusters, filenames):
+        if type(filenames) == str:
+            filenames = [filenames]
+
+        cluster_nos = []
+
+        for filename in filenames:
+            cond = audio_clusters['filename'] == filename
+            row = audio_clusters[cond]
+            cluster_no = row['cluster'].to_numpy()[0]
+
+            if cluster_no not in cluster_nos:
+                cluster_nos.append(cluster_no)
+
+        return cluster_nos
+
+    def fill_mixed_clusters(self, save=True):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed_clusters = cluster_groups
+        # clusters = {**real, **fake, **mixed_clusters}
+
+        audio_cluster_path = 'audio-clusters-210929-2138.csv'
+        audio_cluster_path = f'stats/bg-clusters/{audio_cluster_path}'
+        audio_clusters = pd.read_csv(audio_cluster_path)
+
+        audio_path = 'stats/audio-labels-211014-1653.csv'
+        audio_df = pd.read_csv(audio_path)
+        audio_map = {}
+
+        for index in audio_df.index:
+            row = audio_df.loc[index]
+            fake_audio, filename = row['fake_audio'], row['filename']
+            audio_map[filename] = fake_audio
+
+        print(f'real clusters {len(real)}')
+        print(f'fake clusters {len(fake)}')
+        print(f'mixed clusters {len(mixed_clusters)}')
+
+        cluster_log, audio_log = [], []
+        filename_log, face_label_log = [], []
+        distance_log, c_fake_log = [], []
+        c_real_log, label_log = [], []
+
+        actual_reals = []
+        confirm_fakes, confirm_reals = [], []
+        classified_fakes, classified_reals = 0, 0
+
+        for cluster_no in tqdm(mixed_clusters):
+            cluster = mixed_clusters[cluster_no]
+            # print(cluster)
+
+            is_real = cluster['label'] == 0
+            real_rows = cluster[is_real]
+            # fake_rows = cluster[~is_real]
+
+            real_hashes = real_rows['face_hash'].to_numpy()
+            real_hashes = np.unique(real_hashes)
+            hashes = cluster['face_hash'].to_numpy()
+            labels = cluster['label'].to_numpy()
+            filenames = cluster['filename'].to_numpy()
+            real_filenames = real_rows['filename'].to_numpy()
+            real_audio_cluster_nos = self.get_real_audio_clusters(
+                audio_clusters, real_filenames
+            )
+
+            for k in range(len(filenames)):
+                c_fake, c_real = 0, 0
+                filename = filenames[k]
+                face_hash, label = hashes[k], labels[k]
+                audio_label = audio_map.get(filename, 0.5)
+                distance = self.get_min_distance(
+                    face_hash, real_hashes
+                )
+
+                if (label == 1) and (audio_label == 0):
+                    audio_cluster_no = self.get_real_audio_clusters(
+                        audio_clusters, filename
+                    )
+
+                    if audio_cluster_no in real_audio_cluster_nos:
+                        confirm_fakes.append(filename)
+                        face_label_log.append(1)
+                    else:
+                        confirm_reals.append(filename)
+                        face_label_log.append(0)
+
+                    label_log.append(label)
+                    cluster_log.append(cluster_no)
+                    audio_log.append(audio_label)
+                    filename_log.append(filename)
+                    distance_log.append(distance)
+
+                    c_fake_log.append(0)
+                    c_real_log.append(0)
+                    continue
+
+                is_fake = int(distance > 0)
+
+                if label == 0:
+                    actual_reals.append(filename)
+                    assert is_fake == 0
+                elif is_fake:
+                    classified_fakes += 1
+                    c_fake = 1
+                else:
+                    classified_reals += 1
+                    c_real = 1
+
+                label_log.append(label)
+                cluster_log.append(cluster_no)
+                audio_log.append(audio_label)
+                filename_log.append(filename)
+                distance_log.append(distance)
+                face_label_log.append(is_fake)
+                c_fake_log.append(c_fake)
+                c_real_log.append(c_real)
+
+        out_df = pd.DataFrame(data={
+            'cluster': cluster_log, 'filename': filename_log,
+            'fake_audio': audio_log, 'face_fake': face_label_log,
+            'distance': distance_log, 'c_fake': c_fake_log,
+            'c_real': c_real_log, 'label': label_log
+        })
+
+        num_fakes = face_label_log.count(1)
+        num_reals = face_label_log.count(0)
+        total = num_reals + num_fakes
+        labelled_reals = (
+            num_reals - classified_reals - len(actual_reals)
+        )
+
+        print('')
+        print(f'confirm fakes: {len(confirm_fakes)}')
+        print(f'classified fakes: {classified_fakes}')
+        print(f'fakes: {num_fakes}')
+        print('')
+        print(f'confirm reals: {len(confirm_reals)}')
+        print(f'actual reals: {len(actual_reals)}')
+        print(f'classified reals: {classified_reals}')
+        print(f'labelled reals: {labelled_reals}')
+        print(f'reals: {num_reals}')
+        print('')
+        print(f'total: {total}')
+
+        if save:
+            name = f'mixed-fill-faces-{self.stamp}'
+            out_path = f'stats/bg-clusters/{name}.csv'
+            out_df.to_csv(out_path, index=False)
+            print(f'saved to {out_path}')
+
+        # print(confirm_fakes)
+        return {
+            'confirm_fakes': confirm_fakes,
+            'actual_reals': actual_reals
+        }
+
+    def analyse_distances(self):
+        name = 'mixed-fill-faces-211015-1306.csv'
+        path = f'stats/bg-clusters/{name}'
+
+        df = pd.read_csv(path)
+        c_fakes = df[df['c_fake'] == 1]
+        distances = c_fakes['distance'].to_numpy()
+        print(len(distances))
+        plt.hist(distances)
+        plt.show()
+
+    def manual_label_mixed(self):
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed = cluster_groups
+        clusters = {**real, **fake, **mixed}
+
+        audio_path = 'stats/audio-labels-211014-1653.csv'
+        audio_df = pd.read_csv(audio_path)
+        audio_map = {}
+
+        for index in audio_df.index:
+            row = audio_df.loc[index]
+            fake_audio, filename = row['fake_audio'], row['filename']
+            audio_map[filename] = fake_audio
+
+        result = self.fill_mixed_clusters(save=False)
+        confirm_fakes = result['confirm_fakes']
+        actual_reals = result['actual_reals']
+        ignore_files = confirm_fakes + actual_reals
+
+        cross_path = f'stats/bg-clusters/cross-clusters-labelled.csv'
+        cross_df = pd.read_csv(cross_path)
+        name = 'mixed-fill-faces.csv'
+        path = f'stats/bg-clusters/{name}'
+
+        df = pd.read_csv(path)
+        if 'manual' not in df:
+            print('INITIALISING MANUAL')
+            df['manual'] = 'X'
+
+        rows, indexes = [], []
+
+        for index in df.index:
+            row = df.loc[index]
+            filename = row['filename']
+            if filename not in ignore_files:
+                rows.append(row)
+                indexes.append(index)
+
+        sorted_rows = rows
+        total = len(sorted_rows)
+        # distances = [r['distance'] for r in rows]
+        # arg_indexes = np.argsort(distances)
+        # sorted_rows = [rows[index] for index in arg_indexes]
+        input(f'total to fill {total}: ')
+        # print(sorted_rows)
+
+        skip = True
+        prev_cluster_no = None
+        completed, k = 0, 0
+
+        while k < len(sorted_rows):
+            row = sorted_rows[k]
+            cluster_no = row['cluster']
+            filename = row['filename']
+            distance = row['distance']
+            new_cluster = cluster_no != prev_cluster_no
+            audio_fake = audio_map.get(filename, None)
+            index = indexes[k]
+
+            # input(f'INDEX {index}: ')
+            # print(row)
+            # print([k, row['manual'], index])
+
+            if skip and (row['manual'] != 'X'):
+                k += 1
+                continue
+
+            if new_cluster:
+                if prev_cluster_no is not None:
+                    input('>>> ')
+
+                prev_cluster_no = cluster_no
+
+            # print(cross_df, cluster_no)
+            cluster = clusters[cluster_no]
+            real_files = cluster[cluster['label'] == 0]
+            nearest_files = real_files['filename'].to_numpy()
+
+            if new_cluster and (len(nearest_files) < 11):
+                self.thumbnail_videos(cluster_no, nearest_files)
+            else:
+                print(f'{len(nearest_files)} nearest filenames')
+
+            file_path = f'datasets/train/videos/{filename}'
+            os.system(f'xdg-open {file_path}')
+
+            print(f'cluster: {cluster_no}')
+            print(f'audio fake? {audio_fake}')
+            print(f'distance: {distance}')
+            print(f'nearest files: {nearest_files}')
+            print(f'filename: {filename}')
+
+            while True:
+                prompt = f'[{k}/{total}][{completed}]: '
+
+                try:
+                    command = input(prompt).strip()
+                except KeyboardInterrupt:
+                    continue
+
+                if command == 'b':
+                    completed -= 2
+                    k -= 2
+                    skip = False
+                    break
+                elif command == 'n':
+                    break
+
+                if command == 'f':
+                    df.loc[index, 'manual'] = 'F'
+                    break
+                elif command == 'h':
+                    df.loc[index, 'manual'] = 'H'
+                    break
+                elif command == 'd':
+                    df.loc[index, 'manual'] = 'D'
+                    break
+                elif command == 'r':
+                    df.loc[index, 'manual'] = 'R'
+                    break
+
+            df.to_csv(path, index=False)
+            completed += 1
+            k += 1
+
+
