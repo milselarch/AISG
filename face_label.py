@@ -21,6 +21,7 @@ clusterizer = FaceCluster()
 # clusterizer.auto_fill_fake_clusters()
 # clusterizer.fill_mixed_clusters(False)
 # clusterizer.analyse_distances()
-clusterizer.manual_label_mixed()
+# clusterizer.manual_label_mixed()
+clusterizer.stitch_labels()
 
 print('DONE')

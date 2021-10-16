@@ -1128,4 +1128,118 @@ class FaceCluster(object):
             completed += 1
             k += 1
 
+    def stitch_labels(self, save=True):
+        mixed_path = 'mixed-fill-faces.csv'
+        mixed_path = f'stats/bg-clusters/{mixed_path}'
+        half_path = 'video-labels-211015-1016.csv'
+        half_path = f'stats/bg-clusters/{half_path}'
+        labels_path = f'datasets/extra-labels.csv'
+        cross_path = f'cross-clusters-labelled.csv'
+        cross_path = f'stats/bg-clusters/{cross_path}'
 
+        cluster_groups = self.get_clusters_info(verbose=False)
+        real, fake, mixed = cluster_groups
+        clusters = {**real, **fake, **mixed}
+
+        cross_df = pd.read_csv(cross_path)
+        labels_df = pd.read_csv(labels_path)
+        mixed_df = pd.read_csv(mixed_path)
+        half_df = pd.read_csv(half_path)
+        filename_log, label_log = [], []
+        cluster_log = []
+
+        result = self.fill_mixed_clusters(save=False)
+        confirm_fakes = result['confirm_fakes']
+        actual_reals = result['actual_reals']
+
+        for index in tqdm(mixed_df.index):
+            row = mixed_df.loc[index]
+            filename = row['filename']
+            cluster_no = row['cluster']
+
+            if filename in actual_reals:
+                label = 0
+            elif filename in confirm_fakes:
+                label = 1
+            else:
+                str_label = row['manual']
+                assert str_label in ('F', 'R')
+                label = {'F': 1, 'R': 0}[str_label]
+
+            cluster_log.append(cluster_no)
+            filename_log.append(filename)
+            label_log.append(label)
+
+        for index in tqdm(half_df.index):
+            row = half_df.loc[index]
+            filename = row['filename']
+            cluster_no = row['cluster']
+
+            str_label = row['label']
+            assert str_label in ('F', 'R')
+            label = {'F': 1, 'R': 0}[str_label]
+            cluster_log.append(cluster_no)
+            assert filename not in filename_log
+            filename_log.append(filename)
+            label_log.append(label)
+
+        total, skips = 0, 0
+        pbar = tqdm(cross_df.index)
+
+        for index in pbar:
+            row = cross_df.loc[index]
+            cluster_no = row['cluster']
+            nearest_distance = row['nearest_distance']
+            str_label = row['label']
+
+            if nearest_distance == -1:
+                continue
+            if str_label in ('X', 'H', 'D'):
+                continue
+
+            try:
+                assert str_label in ('F', 'R')
+            except AssertionError as e:
+                print('BAD STR LABEL', str_label)
+                raise e
+
+            label = {'F': 1, 'R': 0}[str_label]
+            cluster = clusters[cluster_no]
+            filenames = cluster['filename'].to_numpy()
+
+            for filename in filenames:
+                pbar.set_description(f'skip {skips}/{total}')
+                total += 1
+
+                if filename in filename_log:
+                    skips += 1
+                    continue
+
+                cluster_log.append(cluster_no)
+                filename_log.append(filename)
+                label_log.append(label)
+
+        for index in tqdm(labels_df.index):
+            row = labels_df.loc[index]
+            filename = row['filename']
+            label = row['label']
+
+            if filename in filename_log:
+                continue
+            if label != 0:
+                continue
+
+            cluster_log.append(-1)
+            filename_log.append(filename)
+            label_log.append(0)
+
+        df = pd.DataFrame(data={
+            'cluster': cluster_log, 'filename': filename_log,
+            'label': label_log
+        })
+
+        if save:
+            out_path = f'face-vid-labels-{self.stamp}.csv'
+            out_path = f'stats/bg-clusters/{out_path}'
+            df.to_csv(out_path, index=False)
+            print(f'stitched labels saved to {out_path}')
