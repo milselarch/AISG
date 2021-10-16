@@ -76,6 +76,62 @@ class Area(object):
         return squared_dist ** 0.5
 
 
+class FaceRecords(object):
+    def __init__(self):
+        dt = datetime.datetime.now()
+        self.stamp = dt.strftime('%Y%m%d-%H%M')[2:]
+
+        self.filename_log = []
+        self.face_log = []
+        self.frame_log = []
+
+        self.top_log = []
+        self.left_log = []
+        self.right_log = []
+        self.bottom_log = []
+        self.buffer_log = []
+
+        self.x_scale_log = []
+        self.y_scale_log = []
+        self.num_face_log = []
+
+    def add(
+        self, filename, frame_no, face_no,
+        top, left, right, bottom, buffer,
+        x_scale, y_scale, num_faces
+    ):
+        self.filename_log.append(filename)
+        self.frame_log.append(frame_no)
+        self.face_log.append(face_no)
+
+        self.top_log.append(top)
+        self.left_log.append(left)
+        self.right_log.append(right)
+        self.bottom_log.append(bottom)
+        self.buffer_log.append(buffer)
+
+        self.x_scale_log.append(x_scale)
+        self.y_scale_log.append(y_scale)
+        self.num_face_log.append(num_faces)
+
+    def export(self):
+        path = f'csvs/sorted-detections-{self.stamp}.csv'
+        df = pd.DataFrame(data={
+            'filename': self.filename_log,
+            'frame': self.frame_log, 'face': self.face_log,
+
+            'top': self.top_log, 'left': self.left_log,
+            'right': self.right_log, 'bottom': self.bottom_log,
+            'buffer': self.buffer_log,
+
+            'x_scale': self.x_scale_log, 'y_scale': self.y_scale_log,
+            'num_faces': self.num_face_log
+        })
+
+        df.to_csv(path, index=False)
+        print(f'sorted detections saved to: {path}')
+
+
 class FaceExtractor(object):
     def __init__(self, scale_down=1):
         dt = datetime.datetime.now()
@@ -222,7 +278,8 @@ class FaceExtractor(object):
 
     def export_face_frames(
         self, face_frames, num_faces, rescale_ratios,
-        np_frames, base_dir, excluded_faces=()
+        np_frames, base_dir, face_records, filename,
+        excluded_faces=()
     ):
         for face_no in range(num_faces):
             if face_no in excluded_faces:
@@ -257,6 +314,7 @@ class FaceExtractor(object):
                 b_bottom = int(rescale * (bottom + buffer))
 
                 face_crop = frane[b_top:b_bottom, b_left:b_right]
+                x_scale, y_scale = 1, 1
 
                 if rescale_ratios is not None:
                     x_scale, y_scale = rescale_ratios
@@ -265,6 +323,14 @@ class FaceExtractor(object):
                     face_crop = cv2.resize(
                         face_crop, (new_width, new_height)
                     )
+
+                face_records.add(
+                    filename=filename, frame_no=frame_no,
+                    face_no=face_no, buffer=buffer,
+                    top=top, left=left, right=right, bottom=bottom,
+                    x_scale=x_scale, y_scale=y_scale,
+                    num_faces=num_faces
+                )
 
                 im = Image.fromarray(face_crop)
                 path = f'{base_dir}/{face_no}-{frame_no}.jpg'
@@ -304,6 +370,7 @@ class FaceExtractor(object):
         if filenames is None:
             filenames = self.dataset.all_videos
 
+        face_records = FaceRecords()
         pbar = tqdm(range(len(filenames)))
         faceless_videos = []
 
@@ -371,10 +438,14 @@ class FaceExtractor(object):
 
             self.export_face_frames(
                 sorted_face_frames, num_faces, rescale_ratios,
-                np_frames, base_dir, excluded_faces=excluded_faces
+                np_frames, base_dir, excluded_faces=excluded_faces,
+                filename=filename, face_records=face_records,
             )
 
         # base_faces.to_csv(output_path, index=False)
         # print(f'SAVED TO {output_path}')
         print(f'INVALID VIDEOS', self.invalid_videos)
         print(f'FACELESS VIDEOS', faceless_videos)
+        face_records.export()
+
+

@@ -1243,3 +1243,102 @@ class FaceCluster(object):
             out_path = f'stats/bg-clusters/{out_path}'
             df.to_csv(out_path, index=False)
             print(f'stitched labels saved to {out_path}')
+
+    @staticmethod
+    def make_audio_map(
+        audio_path='stats/audio-labels-211014-1653.csv'
+    ):
+        audio_df = pd.read_csv(audio_path)
+        audio_map = {}
+
+        for index in audio_df.index:
+            row = audio_df.loc[index]
+            fake_audio, filename = row['fake_audio'], row['filename']
+            audio_map[filename] = fake_audio
+
+        return audio_map
+
+    @staticmethod
+    def make_face_map(
+        face_path='stats/bg-clusters/face-vid-labels.csv'
+    ):
+        face_df = pd.read_csv(face_path)
+        face_map = {}
+
+        for index in face_df.index:
+            row = face_df.loc[index]
+            fake_face, filename = row['label'], row['filename']
+            face_map[filename] = fake_face
+
+        return face_map
+
+    @staticmethod
+    def make_labels_map(
+        labels_path=f'datasets/extra-labels.csv'
+    ):
+        labels_df = pd.read_csv(labels_path)
+        labels_map = {}
+
+        for index in labels_df.index:
+            row = labels_df.loc[index]
+            label, filename = row['label'], row['filename']
+            labels_map[filename] = label
+
+        return labels_map
+
+    def generate_all_labels(self, save=True):
+        audio_map = self.make_audio_map()
+        face_map = self.make_face_map()
+        labels_map = self.make_labels_map()
+
+        audio_log, face_log, swap_log = [], [], []
+        filename_log, label_log = [], []
+        both_fake_log = []
+
+        for filename in tqdm(labels_map):
+            label = labels_map[filename]
+            face_fake = face_map.get(filename, 0.5)
+            audio_fake = audio_map.get(filename, 0.5)
+            swap_fake, both_fake = 0, 0
+
+            if label == 1:
+                if (audio_fake == 0) and (face_fake == 0):
+                    swap_fake = 1
+                elif (audio_fake == 1) and (face_fake == 1):
+                    both_fake = 1
+
+            audio_log.append(audio_fake)
+            face_log.append(face_fake)
+            swap_log.append(swap_fake)
+            both_fake_log.append(both_fake)
+
+            filename_log.append(filename)
+            label_log.append(label)
+
+        df = pd.DataFrame(data={
+            'filename': filename_log, 'label': label_log,
+            'audio_fake': audio_log, 'face_fake': face_log,
+            'swap_fake': swap_log, 'both_fake': both_fake_log
+        })
+
+        num_fakes = label_log.count(1)
+        num_reals = label_log.count(0)
+        both_fakes = both_fake_log.count(1)
+        audio_fakes = audio_log.count(1)
+        swap_fakes = swap_log.count(1)
+        face_fakes = face_log.count(1)
+
+        print(f'total {num_fakes + num_reals}')
+        print(f'total fakes {num_fakes}')
+        print(f'swap fakes {swap_fakes}')
+        print(f'both fakes {both_fakes}')
+        print(f'audio only fakes {audio_fakes - both_fakes}')
+        print(f'face only fakes {face_fakes - both_fakes}')
+        print(f'total reals {num_reals}')
+
+        if save:
+            out_path = f'stats/all-labels-{self.stamp}.csv'
+            df.to_csv(out_path, index=False)
+            print(f'all labels saved to {out_path}')
+
+
