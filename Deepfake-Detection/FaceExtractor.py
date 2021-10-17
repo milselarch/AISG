@@ -332,10 +332,8 @@ class FaceExtractor(object):
         np_frames, base_dir, face_records, filename,
         excluded_faces=(), export_size=256
     ):
-        try:
-            shift_left = min(excluded_faces)
-        except ValueError:
-            shift_left = 0
+        shift_left = 0
+        bad_ratios = []
 
         for face_no in range(num_faces):
             if face_no in excluded_faces:
@@ -409,12 +407,26 @@ class FaceExtractor(object):
                     face_crop, (scaled_width, scaled_height)
                 )
                 """
-                face_crop = cv2.resize(
-                    face_crop, (export_size, export_size)
-                )
+                dimensions = (scaled_width, scaled_height)
+                face_crop = cv2.resize(face_crop, dimensions)
+                width, height = face_crop.shape[1], face_crop.shape[0]
+
+                # print('FF', face_crop.shape, width, height)
+                clip = abs(width - height) // 2
+                # print(clip, width > height)
+
+                if clip != 0:
+                    if width > height:
+                        face_crop = face_crop[:, clip:-clip]
+                    else:
+                        face_crop = face_crop[clip:-clip, :]
+
+                dimensions = (export_size, export_size)
+                # print('NEW SHAPE', face_crop.shape)
+                face_crop = cv2.resize(face_crop, dimensions)
 
                 if (ratio > 1.05) or (ratio < 0.95):
-                    print('POORLY SIZED', filename, face_no, ratio)
+                    bad_ratios.append((face_no, ratio))
 
                 face_records.add(
                     filename=filename, frame_no=frame_no,
@@ -425,10 +437,12 @@ class FaceExtractor(object):
                 )
 
                 im = Image.fromarray(face_crop)
-                shifted_face_no = face_no - shift_left
-                assert shifted_face_no in (0, 1)
+                shifted_face_no = max(face_no - shift_left, 0)
                 path = f'{base_dir}/{shifted_face_no}-{frame_no}.jpg'
                 im.save(path)
+
+        if len(bad_ratios) > 0:
+            print('POORLY SIZED', filename, bad_ratios)
 
     @staticmethod
     def exclude_faces(sorted_face_frames, min_frames=5):
