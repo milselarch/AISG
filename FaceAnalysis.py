@@ -11,7 +11,7 @@ import os
 
 from datetime import datetime
 from tqdm.auto import tqdm
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 class FaceCluster(object):
@@ -1341,4 +1341,252 @@ class FaceCluster(object):
             df.to_csv(out_path, index=False)
             print(f'all labels saved to {out_path}')
 
+    @staticmethod
+    def get_swap_videos():
+        path = f'stats/all-labels-211016-1335.csv'
+        df = pd.read_csv(path)
+        swap_videos = df[df['swap_fake'] == 1]
+        swap_filenames = swap_videos['filename'].to_numpy()
+        swap_filenames = list(swap_filenames)
+        print(swap_filenames)
 
+    def count_video_faces(
+        self, show=True, path=None,
+        exclude_reals=False, exclude_fakes=False
+    ):
+        assert not (exclude_reals and exclude_fakes)
+
+        if path is None:
+            name = 'sorted-detections-211016-1319.csv'
+            path = f'Deepfake-Detection/csvs/{name}'
+
+        detections = pd.read_csv(path)
+        face_map = self.make_face_map()
+        num_face_arr = detections['num_faces'].to_numpy()
+        filename_arr = detections['filename'].to_numpy()
+        face_count_map = {}
+
+        for k in tqdm(range(len(filename_arr))):
+            num_faces = num_face_arr[k]
+            filename = filename_arr[k]
+            face_fake = face_map.get(filename, 0.5)
+
+            if exclude_reals and (face_fake == 0):
+                continue
+            if exclude_fakes and (face_fake != 0):
+                continue
+
+            if num_faces not in face_count_map:
+                face_count_map[num_faces] = []
+
+            face_files = face_count_map[num_faces]
+            if filename in face_files:
+                continue
+
+            face_files.append(filename)
+
+        face_keys = sorted(list(face_count_map.keys()))
+
+        if show:
+            for num_faces in face_keys:
+                files = face_count_map[num_faces]
+                print(f'{num_faces} face files = {len(files)}')
+
+        return detections, face_count_map
+
+    @staticmethod
+    def draw_rects(image, frame_rows):
+        pil_img = Image.fromarray(image)
+        img_draw = ImageDraw.Draw(pil_img)
+
+        for k in range(len(frame_rows)):
+            frame = frame_rows.iloc[k]
+            face_no = frame['face']
+            assert face_no in (0, 1)
+
+            color = 'red' if face_no == 0 else '#AAFF00'
+            top, bottom = frame['top'], frame['bottom']
+            left, right = frame['left'], frame['right']
+            shape = [(left, top), (right, bottom)]
+            img_draw.rectangle(shape, outline=color, width=10)
+
+        return np.array(pil_img)
+
+    def manual_label_two_face(self):
+        path = 'stats/sorted-detections.csv'
+        result = self.count_video_faces(path=path)
+        detections, face_count_map = result
+        face_map = self.make_face_map()
+        # print(detections)
+        # input('>>> ')
+
+        two_face_files = face_count_map[2]
+        total = len(two_face_files)
+        k, skip = 0, True
+
+        if 'talker' not in detections:
+            detections['talker'] = -1
+
+        """
+        cond = detections['num_faces'] == 0
+        detections.loc[cond, 'face'] = 0
+        detections.loc[cond, 'num_faces'] = 1
+        detections.to_csv(path, index=False)
+        """
+        cond_face_0 = detections['face'] == 0
+        cond_face_1 = detections['face'] == 1
+
+        while k < len(two_face_files):
+            filename = two_face_files[k]
+            cond = detections['filename'] == filename
+            fake_face = face_map.get(filename, 0.5)
+            message = f'{filename} = [{fake_face}]'
+
+            frames = detections[cond]
+            talker = frames['talker'].to_numpy()[0]
+            num_faces = frames['num_faces'].to_numpy()[0]
+            frame_nos = frames['frame'].to_numpy()
+            face_nos, frame_no = None, 0
+            frame_rows = None
+
+            # print([num_faces])
+            # input('---')
+            if skip and (talker != -1):
+                k += 1
+                continue
+
+            for frame_no in frame_nos:
+                frame_rows = frames[frames['frame'] == frame_no]
+                face_nos = frame_rows['face'].to_numpy()
+                face_nos = list(sorted(face_nos))
+
+                if face_nos == [0, 1]:
+                    break
+
+            if face_nos != [0, 1]:
+                assert len(face_nos) == 1
+                detections.loc[cond, 'face'] = 0
+                detections.loc[cond, 'num_faces'] = 1
+                detections.to_csv(path, index=False)
+                print('REWROTE FACES', filename)
+                k += 1
+                continue
+
+            print(message)
+            file_path = f'datasets/train/videos/{filename}'
+            os.system(f'xdg-open {file_path}')
+            out = loader.load_video(
+                file_path, specific_frames=[frame_no]
+            )
+
+            frame_img = out.out_video[0]
+            image = self.draw_rects(frame_img, frame_rows)
+            plt.title(message)
+            plt.imshow(image)
+            plt.show()
+
+            while True:
+                prompt = f'[{k}/{total}]: '
+
+                try:
+                    command = input(prompt).strip()
+                except KeyboardInterrupt:
+                    continue
+
+                if command == 'b':
+                    k -= 2
+                    skip = False
+                    break
+                elif command == 'n':
+                    break
+
+                if command == 'r':
+                    detections.loc[cond & cond_face_0, 'talker'] = 1
+                    detections.loc[cond & cond_face_1, 'talker'] = 0
+                    break
+                elif command == 'g':
+                    detections.loc[cond & cond_face_1, 'talker'] = 1
+                    detections.loc[cond & cond_face_0, 'talker'] = 0
+                    break
+
+            # frames = detections[cond]
+            # print(frames)
+            print('END', path)
+            detections.to_csv(path, index=False)
+            k += 1
+
+    def face_name_shift(self):
+        # 61ba23efc5776bf5
+        folder = 'datasets-local/faces'
+
+        for subdir in tqdm(os.listdir(folder)):
+            filenames = []
+            path = os.path.join(folder, subdir)
+            for (dirpath, dirnames, filenames) in os.walk(path):
+                filenames.extend(filenames)
+                break
+
+            # print(filenames)
+            # input(f'{subdir}> ')
+            face_nos = []
+
+            for filename in filenames:
+                face_no = int(filename.split('-')[0])
+                if face_no not in face_nos:
+                    face_nos.append(face_no)
+
+            face_nos = sorted(face_nos)
+
+            if (len(face_nos) == 1) and (face_nos[0] != 0):
+                print('BAD DIR', subdir)
+
+                for filename in filenames:
+                    new_filename = '0' + filename[1:]
+                    os.rename(
+                        os.path.join('.', path, filename),
+                        os.path.join('.', path, new_filename)
+                    )
+
+    def verify_detections(self):
+        path = 'stats/sorted-detections.csv'
+        detections = pd.read_csv(path)
+
+        filenames = detections['filename'].to_numpy()
+        face_nos = detections['face'].to_numpy()
+        frame_nos = detections['frame'].to_numpy()
+
+        for k in tqdm(range(len(filenames))):
+            filename = filenames[k]
+            face_no = face_nos[k]
+            frame_no = frame_nos[k]
+
+            name = filename[:filename.index('.')]
+            base_dir = f'./datasets-local/faces/{name}'
+            path = f'{base_dir}/{face_no}-{frame_no}.jpg'
+
+            try:
+                assert os.path.exists(path)
+            except AssertionError as e:
+                print('BAD PATH', path)
+                raise e
+
+    def detections_label(self):
+        path = 'stats/sorted-detections.csv'
+        detections = pd.read_csv(path)
+        face_map = self.make_face_map()
+
+        for index in tqdm(detections.index):
+            row = detections.loc[index]
+            filename = row['filename']
+            num_faces = row['num_faces']
+            is_talker = row['talker']
+
+            face_fake = face_map.get(filename, 0.5)
+            if (num_faces > 1) and (is_talker == 0):
+                face_fake = 0
+
+            detections.loc[index, 'face_fake'] = face_fake
+
+        out_path = f'stats/labelled-detections-{self.stamp}.csv'
+        detections.to_csv(out_path, index=False)
+        print(f'labelled detections saved to {out_path}')

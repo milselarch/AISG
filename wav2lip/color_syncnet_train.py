@@ -62,7 +62,6 @@ class Dataset(object):
 
         return spec[start_idx : end_idx, :]
 
-
     def __len__(self):
         return len(self.all_videos)
 
@@ -105,7 +104,8 @@ class Dataset(object):
 
                 window.append(img)
 
-            if not all_read: continue
+            if not all_read:
+                continue
 
             try:
                 wavpath = join(vidname, "audio.wav")

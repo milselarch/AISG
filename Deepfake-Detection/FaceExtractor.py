@@ -276,13 +276,70 @@ class FaceExtractor(object):
 
         return face_frames
 
+    def square_coords(
+        self, top, left, right, bottom,
+        x_scale, y_scale, rescale, image
+    ):
+        img_width = image.shape[1] / rescale
+        img_height = image.shape[0] / rescale
+        x_clip = img_width * (1 - 1.0 / x_scale) / 2
+        y_clip = img_height * (1 - 1.0 / y_scale) / 2
+
+        top = (top - y_clip) * y_scale
+        bottom = (bottom - y_clip) * y_scale
+        left = (left - x_clip) * x_scale
+        right = (right - x_clip) * x_scale
+
+        width = right - left
+        height = bottom - top
+        diff = abs(width - height)
+
+        if (bottom - top) > (right - left):
+            left = max(left - diff / 2, 0)
+            right = min(right + diff / 2, img_width)
+            distance = (bottom - top) - (right - left)
+
+            if distance > 0:
+                if left == 0:
+                    right += distance
+                elif right == img_width:
+                    left -= distance
+
+        elif (bottom - top) < (right - left):
+            top = max(top - diff / 2, 0)
+            bottom = min(bottom + diff / 2, img_height)
+            distance = (right - left) - (bottom - top)
+
+            if distance > 0:
+                if top == 0:
+                    bottom += distance
+                elif bottom == img_height:
+                    top -= distance
+
+        top = max(top, 0)
+        bottom = min(bottom, img_height)
+        left = max(left, 0)
+        right = min(right, img_width)
+
+        top = (top / y_scale) + y_clip
+        bottom = (bottom / y_scale) + y_clip
+        left = (left / x_scale) + x_clip
+        right = (right / x_scale) + x_clip
+        return top, left, right, bottom
+
     def export_face_frames(
         self, face_frames, num_faces, rescale_ratios,
         np_frames, base_dir, face_records, filename,
-        excluded_faces=()
+        excluded_faces=(), export_size=256
     ):
+        try:
+            shift_left = min(excluded_faces)
+        except ValueError:
+            shift_left = 0
+
         for face_no in range(num_faces):
             if face_no in excluded_faces:
+                shift_left += 1
                 continue
 
             #  print(f'FRAME NO {i} {np_frames.shape}')
@@ -293,7 +350,9 @@ class FaceExtractor(object):
             for i, row in enumerate(face_rows):
                 frame_no = row['frames']
                 index = frame_no // self.every_n_frames
-                frane = np_frames[index]
+                frame = np_frames[index]
+                img_width = frame.shape[1]
+                img_height = frame.shape[0]
                 # print('ROW', row)
 
                 top, left, right, bottom = self.extract_coords(
@@ -307,22 +366,55 @@ class FaceExtractor(object):
                 area_root = area ** 0.5
                 buffer = int(area_root // 7)
 
-                rescale = self.rescale
-                b_top = int(rescale * max(top - buffer, 0))
-                b_left = int(rescale * max(left - buffer, 0))
-                b_right = int(rescale * (right + buffer))
-                b_bottom = int(rescale * (bottom + buffer))
-
-                face_crop = frane[b_top:b_bottom, b_left:b_right]
                 x_scale, y_scale = 1, 1
-
                 if rescale_ratios is not None:
                     x_scale, y_scale = rescale_ratios
-                    new_width = int(face_crop.shape[1] * x_scale)
-                    new_height = int(face_crop.shape[0] * y_scale)
-                    face_crop = cv2.resize(
-                        face_crop, (new_width, new_height)
-                    )
+
+                rescale = self.rescale
+                b_top = max(top - buffer / y_scale, 0)
+                b_left = max(left - buffer / x_scale, 0)
+                b_right = min(right + buffer / x_scale, img_width)
+                b_bottom = min(bottom + buffer / y_scale, img_height)
+
+                # get square coordinates
+                s_top, s_left, s_right, s_bottom = self.square_coords(
+                    top, left, right, bottom,
+                    x_scale, y_scale, rescale, frame
+                )
+                # find largest bounding box between square, buffer
+                f_top, f_left, f_right, f_bottom = (
+                    min(b_top, s_top), min(b_left, s_left),
+                    max(b_right, s_right), max(b_bottom, s_bottom)
+                )
+                # get square coordinates of largest bounding box
+                f_top, f_left, f_right, f_bottom = self.square_coords(
+                    f_top, f_left, f_right, f_bottom,
+                    x_scale, y_scale, rescale, frame
+                )
+
+                f_top = int(f_top * rescale)
+                f_left = int(f_left * rescale)
+                f_right = int(f_right * rescale)
+                f_bottom = int(f_bottom * rescale)
+                face_crop = frame[f_top:f_bottom, f_left:f_right]
+                # print('SCALE', x_scale, y_scale)
+
+                # new_width = int(face_crop.shape[1] * x_scale)
+                # new_height = int(face_crop.shape[0] * y_scale)
+                scaled_width = int((f_right - f_left) * x_scale)
+                scaled_height = int((f_bottom - f_top) * y_scale)
+                ratio = scaled_width / scaled_height
+                """
+                face_crop = cv2.resize(
+                    face_crop, (scaled_width, scaled_height)
+                )
+                """
+                face_crop = cv2.resize(
+                    face_crop, (export_size, export_size)
+                )
+
+                if (ratio > 1.05) or (ratio < 0.95):
+                    print('POORLY SIZED', filename, face_no, ratio)
 
                 face_records.add(
                     filename=filename, frame_no=frame_no,
@@ -333,7 +425,9 @@ class FaceExtractor(object):
                 )
 
                 im = Image.fromarray(face_crop)
-                path = f'{base_dir}/{face_no}-{frame_no}.jpg'
+                shifted_face_no = face_no - shift_left
+                assert shifted_face_no in (0, 1)
+                path = f'{base_dir}/{shifted_face_no}-{frame_no}.jpg'
                 im.save(path)
 
     @staticmethod
@@ -365,7 +459,7 @@ class FaceExtractor(object):
 
     def extract_faces(
         self, filenames=None, export_dir='../datasets-local/faces',
-        pre_resize=False
+        pre_resize=False, export_df=False, export_size=256
     ):
         if filenames is None:
             filenames = self.dataset.all_videos
@@ -446,6 +540,8 @@ class FaceExtractor(object):
         # print(f'SAVED TO {output_path}')
         print(f'INVALID VIDEOS', self.invalid_videos)
         print(f'FACELESS VIDEOS', faceless_videos)
-        face_records.export()
+
+        if export_df:
+            face_records.export()
 
 
