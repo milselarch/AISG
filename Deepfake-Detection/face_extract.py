@@ -7,10 +7,11 @@ from FaceExtractor import FaceExtractor
 # 61ba23efc5776bf5
 # 8ff5133f687d20d4.mp4
 # 8f8f2be1766a03d4.mp4
+# bb34433231a222e5
 
 extractor = FaceExtractor(scale_down=1)
 extractor.extract_faces(
-    filenames=['8ff5133f687d20d4.mp4'],
+    filenames=['bb34433231a222e5.mp4'],
     export_dir='faces', pre_resize=False
 )
 

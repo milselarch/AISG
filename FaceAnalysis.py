@@ -19,7 +19,8 @@ class FaceCluster(object):
         self, labels_path='../datasets/extra-labels.csv',
         durations_path='stats/aisg-durations-210929-0931.csv',
         # cluster_path='stats/bg-clusters/cluster-211008-0015.csv'
-        cluster_path='stats/bg-clusters/cluster-211008-1233.csv'
+        cluster_path='stats/bg-clusters/cluster-211008-1233.csv',
+        load_datasets=True
     ):
         self.cache = {}
         self.labels_path = labels_path
@@ -31,8 +32,10 @@ class FaceCluster(object):
 
         self.video_basedir = 'datasets/train/videos'
         self.base_filename = "detections-20210903-230613.csv"
-        self.base_faces = pd.read_csv(f'stats/{self.base_filename}')
-        self.dataset = datasets.Dataset()
+        # self.base_faces = pd.read_csv(f'stats/{self.base_filename}')
+        if load_datasets:
+            self.dataset = datasets.Dataset()
+
         self.duration_map = None
 
     @staticmethod
@@ -109,8 +112,9 @@ class FaceCluster(object):
         return result
 
     def get_start_frame_no(self, filename):
-        video_frame_rows = self.base_faces[
-            self.base_faces['filename'] == filename
+        base_faces = pd.read_csv(f'stats/{self.base_filename}')
+        video_frame_rows = base_faces[
+            base_faces['filename'] == filename
         ]
 
         num_faces = video_frame_rows['num_faces'].to_numpy()
@@ -132,9 +136,10 @@ class FaceCluster(object):
                 return frame_no
 
     def get_face_areas(self, filename, frame_no, scale=1):
-        face_frames = self.base_faces[
-            (self.base_faces['filename'] == filename) &
-            (self.base_faces['frames'] == frame_no)
+        base_faces = pd.read_csv(f'stats/{self.base_filename}')
+        face_frames = base_faces[
+            (base_faces['filename'] == filename) &
+            (base_faces['frames'] == frame_no)
         ]
 
         face_areas = []
@@ -1259,9 +1264,10 @@ class FaceCluster(object):
         return audio_map
 
     @staticmethod
-    def make_face_map(
-        face_path='stats/bg-clusters/face-vid-labels.csv'
-    ):
+    def make_face_map(face_path=None):
+        if face_path is None:
+            face_path = 'stats/bg-clusters/face-vid-labels.csv'
+
         face_df = pd.read_csv(face_path)
         face_map = {}
 
@@ -1570,10 +1576,11 @@ class FaceCluster(object):
                 print('BAD PATH', path)
                 raise e
 
-    def detections_label(self):
+    def detections_label(self, face_map=None):
         path = 'stats/sorted-detections.csv'
         detections = pd.read_csv(path)
-        face_map = self.make_face_map()
+        if face_map is None:
+            face_map = self.make_face_map()
 
         for index in tqdm(detections.index):
             row = detections.loc[index]

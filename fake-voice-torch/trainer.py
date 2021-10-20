@@ -9,6 +9,7 @@ import tensorflow as tf
 import torch.optim as optim
 import torch.multiprocessing as mp
 import pandas as pd
+import Dataset
 import random
 import torch
 import utils
@@ -232,7 +233,8 @@ class Trainer(BaseTrainer):
                     record=run_validation
                 )
 
-                self.accum_train(score, self.perf_decay)
+                if run_validation:
+                    self.accum_train(score, self.perf_decay)
                 
             pbar.set_description(desc)
             pbar.update(batch_size)
@@ -280,14 +282,15 @@ class Trainer(BaseTrainer):
     def update_best_model(
         self, decay, train_eps, validate_eps, best_score, save_folder
     ):
+        episodes = train_eps + validate_eps
+
         train_score = self.get_smooth_score(
-            self.accum_train_score, decay, train_eps
+            self.accum_train_score, decay, episodes
         )
         validate_score = self.get_smooth_score(
-            self.accum_validate_score, decay, validate_eps
+            self.accum_validate_score, decay, episodes
         )
 
-        episodes = train_eps + validate_eps
         smooth_score = min(train_score, validate_score)
         round_train = round_sig(train_score, sig=2)
         round_validate = round_sig(validate_score, sig=2)
@@ -402,7 +405,6 @@ class Trainer(BaseTrainer):
     ):
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths,
             is_training=False, randomize=False
         )
 
@@ -453,7 +455,7 @@ class Trainer(BaseTrainer):
         return preds
 
     def prepare_batch(
-        self, batch_size=16, fake_p=0.5, target_lengths=(128, 128),
+        self, batch_size=16, fake_p=0.5,
         is_training=True, randomize=False
     ):
         # why does randomizing filenames not work?

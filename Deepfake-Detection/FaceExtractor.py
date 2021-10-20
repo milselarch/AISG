@@ -278,7 +278,7 @@ class FaceExtractor(object):
 
     def square_coords(
         self, top, left, right, bottom,
-        x_scale, y_scale, rescale, image
+        x_scale, y_scale, rescale, image, shrink=False
     ):
         img_width = image.shape[1] / rescale
         img_height = image.shape[0] / rescale
@@ -320,6 +320,19 @@ class FaceExtractor(object):
         bottom = min(bottom, img_height)
         left = max(left, 0)
         right = min(right, img_width)
+
+        width = right - left
+        height = bottom - top
+        clip = abs(width - height)
+        # print('SHRINK', width, height, x_scale, y_scale)
+
+        if shrink and (clip != 0):
+            if width > height:
+                top -= clip // 2
+                bottom += clip // 2
+            else:
+                left -= clip // 2
+                right += clip // 2
 
         top = (top / y_scale) + y_clip
         bottom = (bottom / y_scale) + y_clip
@@ -387,7 +400,7 @@ class FaceExtractor(object):
                 # get square coordinates of largest bounding box
                 f_top, f_left, f_right, f_bottom = self.square_coords(
                     f_top, f_left, f_right, f_bottom,
-                    x_scale, y_scale, rescale, frame
+                    x_scale, y_scale, rescale, frame, shrink=True
                 )
 
                 f_top = int(f_top * rescale)
