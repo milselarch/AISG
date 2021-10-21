@@ -29,7 +29,7 @@ def round_sig(x, sig=2):
 
 class MesoTrainer(object):
     def __init__(
-        self, seed=42, test_p=0.1, use_cuda=True,
+        self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01
     ):
         self.date_stamp = self.make_date_stamp()
@@ -66,7 +66,7 @@ class MesoTrainer(object):
         # self.criterion = nn.CrossEntropyLoss()
         self.criterion = nn.BCELoss()
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=0.001,
+            self.model.parameters(), lr=0.0001,
             betas=(0.9, 0.999), eps=1e-08
         )
         self.scheduler = lr_scheduler.StepLR(
@@ -77,9 +77,12 @@ class MesoTrainer(object):
             self.dataset = Dataset(seed=seed)
 
     def batch_train(
-        self, episode_no, batch_size=16, fake_p=0.5,
+        self, episode_no, batch_size=None, fake_p=0.5,
         record=False
     ):
+        if batch_size is None:
+            batch_size = self.batch_size
+
         self.model.train()
         batch_x, np_labels = self.dataset.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
@@ -109,11 +112,14 @@ class MesoTrainer(object):
         return score
 
     def batch_validate(
-        self, episode_no, batch_size=16, fake_p=0.5
+        self, episode_no, batch_size=None, fake_p=0.5
     ):
+        if batch_size is None:
+            batch_size = self.batch_size
+
         batch_x, np_labels = self.dataset.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            is_training=False, randomize=False
+            is_training=False, randomize=True
         )
 
         torch_batch_x = torch.tensor(batch_x).to(self.device)
@@ -139,9 +145,12 @@ class MesoTrainer(object):
         return score
 
     def train(
-        self, episodes=10 * 1000, batch_size=16,
+        self, episodes=10 * 1000, batch_size=None,
         fake_p=0.5
     ):
+        if batch_size is None:
+            batch_size = self.batch_size
+
         self.tensorboard_start()
         episode_no = 0
         validate_eps = 0

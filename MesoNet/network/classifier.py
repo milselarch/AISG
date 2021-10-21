@@ -1,184 +1,239 @@
 import os
 import argparse
 
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import copy
 import torchvision
+
+from overrides import overrides
+
+
+class CustomBatchNorm2d(nn.Module):
+    def __init__(self, *args, is_training=True, **kwargs):
+        super().__init__()
+        self.batch_norm = nn.BatchNorm2d(*args, **kwargs)
+        self.is_training = is_training
+
+    def __call__(self, *args, **kwargs):
+        if self.is_training:
+            return self.batch_norm(*args, **kwargs)
+
+        # eval mode messes up batch norm real bad
+        state = self.batch_norm.state_dict()
+        state = copy.deepcopy(state)
+
+        self.train(True)
+        norm_output = self.batch_norm(*args, **kwargs)
+        self.train(False)
+        self.batch_norm.load_state_dict(state)
+        return norm_output
+
+
+class BooleanVar(object):
+    def __init__(self, value=True):
+        self.value = value
+
+    def set_true(self):
+        self.value = True
+
+    def set_false(self):
+        self.value = False
+
+    def set(self, value):
+        if value:
+            self.value = True
+        else:
+            self.value = False
+
+    def __bool__(self):
+        return self.value
 
 
 class Meso4(nn.Module):
-	"""
-	Pytorch Implemention of Meso4
-	Autor: Honggu Liu
-	Date: July 4, 2019
-	"""
-	def __init__(self, num_classes=2, use_sigmoid=False):
-		super(Meso4, self).__init__()
-		self.num_classes = num_classes
-		self.conv1 = nn.Conv2d(3, 8, 3, padding=1, bias=False)
-		self.bn1 = nn.BatchNorm2d(8)
-		self.relu = nn.ReLU(inplace=True)
-		self.leakyrelu = nn.LeakyReLU(0.1)
+    """
+    Pytorch Implemention of Meso4
+    Autor: Honggu Liu
+    Date: July 4, 2019
+    """
 
-		self.conv2 = nn.Conv2d(8, 8, 5, padding=2, bias=False)
-		self.bn2 = nn.BatchNorm2d(16)
-		self.conv3 = nn.Conv2d(8, 16, 5, padding=2, bias=False)
-		self.conv4 = nn.Conv2d(16, 16, 5, padding=2, bias=False)
-		self.maxpooling1 = nn.MaxPool2d(kernel_size=(2, 2))
-		self.maxpooling2 = nn.MaxPool2d(kernel_size=(4, 4))
-		# flatten: x = x.view(x.size(0), -1)
-		self.dropout = nn.Dropout2d(0.5)
-		self.fc1 = nn.Linear(16*8*8, 16)
-		self.fc2 = nn.Linear(16, num_classes)
-		self.use_sigmoid = use_sigmoid
+    def __init__(self, num_classes=2, use_sigmoid=False):
+        super(Meso4, self).__init__()
+        self.is_training = BooleanVar(True)
 
-	def forward(self, input):
-		# (8, 256, 256)
-		x = self.conv1(input)
-		x = self.relu(x)
-		x = self.bn1(x)
-		# (8, 128, 128)
-		x = self.maxpooling1(x)
+        self.num_classes = num_classes
+        self.conv1 = nn.Conv2d(3, 8, 3, padding=1, bias=False)
+        self.bn1 = CustomBatchNorm2d(
+            8, is_training=self.is_training
+        )
+        self.relu = nn.ReLU(inplace=True)
+        self.leakyrelu = nn.LeakyReLU(0.1)
 
-		# (8, 128, 128)
-		x = self.conv2(x)
-		x = self.relu(x)
-		x = self.bn1(x)
-		# (8, 64, 64)
-		x = self.maxpooling1(x)
+        self.conv2 = nn.Conv2d(8, 8, 5, padding=2, bias=False)
+        self.bn2 = CustomBatchNorm2d(
+            16, is_training=self.is_training
+        )
+        self.conv3 = nn.Conv2d(8, 16, 5, padding=2, bias=False)
+        self.conv4 = nn.Conv2d(16, 16, 5, padding=2, bias=False)
+        self.maxpooling1 = nn.MaxPool2d(kernel_size=(2, 2))
+        self.maxpooling2 = nn.MaxPool2d(kernel_size=(4, 4))
+        # flatten: x = x.view(x.size(0), -1)
+        self.dropout = nn.Dropout2d(0.5)
+        self.fc1 = nn.Linear(16 * 8 * 8, 16)
+        self.fc2 = nn.Linear(16, num_classes)
+        self.use_sigmoid = use_sigmoid
 
-		# (16, 64, 64)
-		x = self.conv3(x)
-		x = self.relu(x)
-		x = self.bn2(x)
-		# (16, 32, 32)
-		x = self.maxpooling1(x)
+    @overrides
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.is_training.set(mode)
 
-		# (16, 32, 32)
-		x = self.conv4(x)
-		x = self.relu(x)
-		x = self.bn2(x)
-		# (16, 8, 8)
-		x = self.maxpooling2(x)
+    def forward(self, input):
+        # (8, 256, 256)
+        x = self.conv1(input)
+        x = self.relu(x)
+        x = self.bn1(x)
+        # (8, 128, 128)
+        x = self.maxpooling1(x)
 
-		# (Batch, 16*8*8)
-		x = x.view(x.size(0), -1)
-		x = self.dropout(x)
-		# (Batch, 16)
-		x = self.fc1(x)
-		x = self.leakyrelu(x)
-		x = self.dropout(x)
-		x = self.fc2(x)
+        # (8, 128, 128)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.bn1(x)
+        # (8, 64, 64)
+        x = self.maxpooling1(x)
 
-		if self.use_sigmoid:
-			x = torch.sigmoid(x)
+        # (16, 64, 64)
+        x = self.conv3(x)
+        x = self.relu(x)
+        x = self.bn2(x)
+        # (16, 32, 32)
+        x = self.maxpooling1(x)
 
-		return x
+        # (16, 32, 32)
+        x = self.conv4(x)
+        x = self.relu(x)
+        x = self.bn2(x)
+        # (16, 8, 8)
+        x = self.maxpooling2(x)
+
+        # (Batch, 16*8*8)
+        x = x.view(x.size(0), -1)
+        x = self.dropout(x)
+        # (Batch, 16)
+        x = self.fc1(x)
+        x = self.leakyrelu(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+
+        if self.use_sigmoid:
+            x = torch.sigmoid(x)
+
+        return x
 
 
 class MesoInception4(nn.Module):
-	"""
-	Pytorch Implemention of MesoInception4
-	Author: Honggu Liu
-	Date: July 7, 2019
-	"""
-	def __init__(self, num_classes=2):
-		super(MesoInception4, self).__init__()
-		self.num_classes = num_classes
-		# InceptionLayer1
-		self.Incption1_conv1 = nn.Conv2d(3, 1, 1, padding=0, bias=False)
-		self.Incption1_conv2_1 = nn.Conv2d(3, 4, 1, padding=0, bias=False)
-		self.Incption1_conv2_2 = nn.Conv2d(4, 4, 3, padding=1, bias=False)
-		self.Incption1_conv3_1 = nn.Conv2d(3, 4, 1, padding=0, bias=False)
-		self.Incption1_conv3_2 = nn.Conv2d(4, 4, 3, padding=2, dilation=2, bias=False)
-		self.Incption1_conv4_1 = nn.Conv2d(3, 2, 1, padding=0, bias=False)
-		self.Incption1_conv4_2 = nn.Conv2d(2, 2, 3, padding=3, dilation=3, bias=False)
-		self.Incption1_bn = nn.BatchNorm2d(11)
+    """
+    Pytorch Implemention of MesoInception4
+    Author: Honggu Liu
+    Date: July 7, 2019
+    """
 
-		# InceptionLayer2
-		self.Incption2_conv1 = nn.Conv2d(11, 2, 1, padding=0, bias=False)
-		self.Incption2_conv2_1 = nn.Conv2d(11, 4, 1, padding=0, bias=False)
-		self.Incption2_conv2_2 = nn.Conv2d(4, 4, 3, padding=1, bias=False)
-		self.Incption2_conv3_1 = nn.Conv2d(11, 4, 1, padding=0, bias=False)
-		self.Incption2_conv3_2 = nn.Conv2d(4, 4, 3, padding=2, dilation=2, bias=False)
-		self.Incption2_conv4_1 = nn.Conv2d(11, 2, 1, padding=0, bias=False)
-		self.Incption2_conv4_2 = nn.Conv2d(2, 2, 3, padding=3, dilation=3, bias=False)
-		self.Incption2_bn = nn.BatchNorm2d(12)
+    def __init__(self, num_classes=2):
+        super(MesoInception4, self).__init__()
+        self.num_classes = num_classes
+        # InceptionLayer1
+        self.Incption1_conv1 = nn.Conv2d(3, 1, 1, padding=0, bias=False)
+        self.Incption1_conv2_1 = nn.Conv2d(3, 4, 1, padding=0, bias=False)
+        self.Incption1_conv2_2 = nn.Conv2d(4, 4, 3, padding=1, bias=False)
+        self.Incption1_conv3_1 = nn.Conv2d(3, 4, 1, padding=0, bias=False)
+        self.Incption1_conv3_2 = nn.Conv2d(4, 4, 3, padding=2, dilation=2, bias=False)
+        self.Incption1_conv4_1 = nn.Conv2d(3, 2, 1, padding=0, bias=False)
+        self.Incption1_conv4_2 = nn.Conv2d(2, 2, 3, padding=3, dilation=3, bias=False)
+        self.Incption1_bn = nn.BatchNorm2d(11)
 
-		# Normal Layer
-		self.conv1 = nn.Conv2d(12, 16, 5, padding=2, bias=False)
-		self.relu = nn.ReLU(inplace=True)
-		self.leakyrelu = nn.LeakyReLU(0.1)
-		self.bn1 = nn.BatchNorm2d(16)
-		self.maxpooling1 = nn.MaxPool2d(kernel_size=(2, 2))
+        # InceptionLayer2
+        self.Incption2_conv1 = nn.Conv2d(11, 2, 1, padding=0, bias=False)
+        self.Incption2_conv2_1 = nn.Conv2d(11, 4, 1, padding=0, bias=False)
+        self.Incption2_conv2_2 = nn.Conv2d(4, 4, 3, padding=1, bias=False)
+        self.Incption2_conv3_1 = nn.Conv2d(11, 4, 1, padding=0, bias=False)
+        self.Incption2_conv3_2 = nn.Conv2d(4, 4, 3, padding=2, dilation=2, bias=False)
+        self.Incption2_conv4_1 = nn.Conv2d(11, 2, 1, padding=0, bias=False)
+        self.Incption2_conv4_2 = nn.Conv2d(2, 2, 3, padding=3, dilation=3, bias=False)
+        self.Incption2_bn = nn.BatchNorm2d(12)
 
-		self.conv2 = nn.Conv2d(16, 16, 5, padding=2, bias=False)
-		self.maxpooling2 = nn.MaxPool2d(kernel_size=(4, 4))
+        # Normal Layer
+        self.conv1 = nn.Conv2d(12, 16, 5, padding=2, bias=False)
+        self.relu = nn.ReLU(inplace=True)
+        self.leakyrelu = nn.LeakyReLU(0.1)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.maxpooling1 = nn.MaxPool2d(kernel_size=(2, 2))
 
-		self.dropout = nn.Dropout2d(0.5)
-		self.fc1 = nn.Linear(16*8*8, 16)
-		self.fc2 = nn.Linear(16, num_classes)
+        self.conv2 = nn.Conv2d(16, 16, 5, padding=2, bias=False)
+        self.maxpooling2 = nn.MaxPool2d(kernel_size=(4, 4))
 
-	# InceptionLayer
-	def InceptionLayer1(self, input):
-		x1 = self.Incption1_conv1(input)
-		x2 = self.Incption1_conv2_1(input)
-		x2 = self.Incption1_conv2_2(x2)
-		x3 = self.Incption1_conv3_1(input)
-		x3 = self.Incption1_conv3_2(x3)
-		x4 = self.Incption1_conv4_1(input)
-		x4 = self.Incption1_conv4_2(x4)
-		y = torch.cat((x1, x2, x3, x4), 1)
-		y = self.Incption1_bn(y)
-		y = self.maxpooling1(y)
+        self.dropout = nn.Dropout2d(0.5)
+        self.fc1 = nn.Linear(16 * 8 * 8, 16)
+        self.fc2 = nn.Linear(16, num_classes)
 
-		return y
+    # InceptionLayer
+    def InceptionLayer1(self, input):
+        x1 = self.Incption1_conv1(input)
+        x2 = self.Incption1_conv2_1(input)
+        x2 = self.Incption1_conv2_2(x2)
+        x3 = self.Incption1_conv3_1(input)
+        x3 = self.Incption1_conv3_2(x3)
+        x4 = self.Incption1_conv4_1(input)
+        x4 = self.Incption1_conv4_2(x4)
+        y = torch.cat((x1, x2, x3, x4), 1)
+        y = self.Incption1_bn(y)
+        y = self.maxpooling1(y)
 
-	def InceptionLayer2(self, input):
-		x1 = self.Incption2_conv1(input)
-		x2 = self.Incption2_conv2_1(input)
-		x2 = self.Incption2_conv2_2(x2)
-		x3 = self.Incption2_conv3_1(input)
-		x3 = self.Incption2_conv3_2(x3)
-		x4 = self.Incption2_conv4_1(input)
-		x4 = self.Incption2_conv4_2(x4)
-		y = torch.cat((x1, x2, x3, x4), 1)
-		y = self.Incption2_bn(y)
-		y = self.maxpooling1(y)
+        return y
 
-		return y
+    def InceptionLayer2(self, input):
+        x1 = self.Incption2_conv1(input)
+        x2 = self.Incption2_conv2_1(input)
+        x2 = self.Incption2_conv2_2(x2)
+        x3 = self.Incption2_conv3_1(input)
+        x3 = self.Incption2_conv3_2(x3)
+        x4 = self.Incption2_conv4_1(input)
+        x4 = self.Incption2_conv4_2(x4)
+        y = torch.cat((x1, x2, x3, x4), 1)
+        y = self.Incption2_bn(y)
+        y = self.maxpooling1(y)
 
-	def forward(self, input):
-		# (Batch, 11, 128, 128)
-		x = self.InceptionLayer1(input)
-		# (Batch, 12, 64, 64)
-		x = self.InceptionLayer2(x)
+        return y
 
-		# (Batch, 16, 64 ,64)
-		x = self.conv1(x)
-		x = self.relu(x)
-		x = self.bn1(x)
-		# (Batch, 16, 32, 32)
-		x = self.maxpooling1(x)
+    def forward(self, input):
+        # (Batch, 11, 128, 128)
+        x = self.InceptionLayer1(input)
+        # (Batch, 12, 64, 64)
+        x = self.InceptionLayer2(x)
 
-		# (Batch, 16, 32, 32)
-		x = self.conv2(x)
-		x = self.relu(x)
-		x = self.bn1(x)
-		# (Batch, 16, 8, 8)
-		x = self.maxpooling2(x)
+        # (Batch, 16, 64 ,64)
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.bn1(x)
+        # (Batch, 16, 32, 32)
+        x = self.maxpooling1(x)
 
-		# (Batch, 16*8*8)
-		x = x.view(x.size(0), -1)
-		x = self.dropout(x)
-		# (Batch, 16)
-		x = self.fc1(x)
-		x = self.leakyrelu(x)
-		x = self.dropout(x)
-		x = self.fc2(x)
+        # (Batch, 16, 32, 32)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.bn1(x)
+        # (Batch, 16, 8, 8)
+        x = self.maxpooling2(x)
 
-		return x
+        # (Batch, 16*8*8)
+        x = x.view(x.size(0), -1)
+        x = self.dropout(x)
+        # (Batch, 16)
+        x = self.fc1(x)
+        x = self.leakyrelu(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
 
+        return x
