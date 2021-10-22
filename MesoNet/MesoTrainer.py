@@ -30,7 +30,8 @@ def round_sig(x, sig=2):
 class MesoTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
-        valid_p=0.05, load_dataset=True, save_threshold=0.01
+        valid_p=0.05, load_dataset=True, save_threshold=0.01,
+        use_inception=False
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -53,9 +54,15 @@ class MesoTrainer(object):
 
         torch.backends.cudnn.benchmark = True
         self.use_cuda = use_cuda
-        self.model = Meso4(
-            num_classes=1, use_sigmoid=True
-        )
+
+        if use_inception:
+            self.model = MesoInception4(
+                num_classes=1, use_sigmoid=True
+            )
+        else:
+            self.model = Meso4(
+                num_classes=1, use_sigmoid=True
+            )
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
