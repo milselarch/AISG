@@ -66,7 +66,7 @@ class MesoTrainer(object):
         # self.criterion = nn.CrossEntropyLoss()
         self.criterion = nn.BCELoss()
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=0.0001,
+            self.model.parameters(), lr=0.001,
             betas=(0.9, 0.999), eps=1e-08
         )
         self.scheduler = lr_scheduler.StepLR(
@@ -75,6 +75,11 @@ class MesoTrainer(object):
 
         if load_dataset:
             self.dataset = Dataset(seed=seed)
+
+    def load_model(self, model_path, eval_mode=True):
+        self.model.load_state_dict(torch.load(model_path))
+        if eval_mode:
+            self.model.eval()
 
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
@@ -143,6 +148,47 @@ class MesoTrainer(object):
         )
 
         return score
+
+    def predict_file(self, filepath:str):
+        assert type(filepath) is str
+        predictions = self.batch_predict([filepath])
+        prediction = predictions[0][0]
+        return prediction
+
+    def batch_predict(self, batch_x, to_numpy=True):
+        if type(batch_x) is str:
+            batch_x = [batch_x]
+
+        if type(batch_x) in (list, tuple):
+            assert type(batch_x[0]) is str
+            labels = [1] * len(batch_x)
+            batch_x, np_labels = self.dataset.load_batch(
+                batch_x, labels
+            )
+
+        if type(batch_x) is np.ndarray:
+            torch_batch_x = torch.tensor(batch_x).to(self.device)
+        else:
+            assert type(batch_x) is torch.Tensor
+            torch_batch_x = batch_x
+
+        self.model.eval()
+        preds = self.model(torch_batch_x)
+        if to_numpy:
+            preds = preds.detach().cpu().numpy()
+
+        return preds
+
+    def load_batch(
+        self, batch_filepaths, batch_labels
+    ):
+        batch_x, np_labels = self.dataset.load_batch(
+            batch_filepaths, batch_labels
+        )
+
+        assert type(batch_x) is np.ndarray
+        assert type(np_labels) is np.ndarray
+        return batch_x, np_labels
 
     def train(
         self, episodes=10 * 1000, batch_size=None,

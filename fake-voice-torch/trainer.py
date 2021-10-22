@@ -324,13 +324,11 @@ class Trainer(BaseTrainer):
         raise ValueError(f'BAD TRAIN VERSION {self.train_version}')
 
     def batch_train_v2(
-        self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024), record=False
+        self, episode_no, batch_size=16, fake_p=0.5
     ):
         self.model.train()
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths,
             is_training=True, randomize=True
         )
 
@@ -368,12 +366,11 @@ class Trainer(BaseTrainer):
 
     def batch_train_v1(
         self, episode_no, batch_size=16, fake_p=0.5,
-        target_lengths=(128, 1024), record=False
+        record=False
     ):
         self.model.train()
         batch_x, np_labels = self.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
-            target_lengths=target_lengths,
             is_training=True, randomize=False
         )
 
