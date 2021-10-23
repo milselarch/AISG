@@ -39,7 +39,8 @@ class Trainer(BaseTrainer):
         valid_p=0.05, weigh_sampling=True, add_aisg=True,
         cache_threshold=20, load_dataset=True, save_threshold=0.01,
         use_batch_norm=True, params=None, use_avs=False,
-        train_version=1, normalize_audio=False
+        train_version=1, normalize_audio=False,
+        preload_path=None
     ):
         super().__init__()
         self.date_stamp = self.make_date_stamp()
@@ -93,6 +94,10 @@ class Trainer(BaseTrainer):
 
         if load_dataset:
             self.load_dataset(self.add_aisg)
+
+        self.preload_path = preload_path
+        if preload_path is not None:
+            self.load_model(preload_path)
 
     def load_model(self, model_path, eval_mode=True):
         self.model.load_state_dict(torch.load(model_path))
