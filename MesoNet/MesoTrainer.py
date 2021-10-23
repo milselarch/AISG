@@ -34,6 +34,7 @@ class MesoTrainer(object):
         use_inception=False
     ):
         self.date_stamp = self.make_date_stamp()
+        self.use_inception = use_inception
 
         self.name = 'Mesonet'
         self.batch_size = 64
