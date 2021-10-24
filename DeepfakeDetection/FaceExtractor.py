@@ -7,7 +7,11 @@ try:
 
 except ModuleNotFoundError:
     from . import ParentImport
-    from .. import datasets
+
+    try:
+        from .. import datasets
+    except ImportError:
+        import datasets
 
     from .network.models import model_selection
     from .detect_from_video import predict_with_model
