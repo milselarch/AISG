@@ -7,12 +7,14 @@ from DeepfakeDetection.FaceExtractor import FaceExtractor
 from ParallelFaceExtract import ParallelFaceExtract
 from PIL import Image
 
-dataset = datasets.Dataset(basedir='datasets')
 length = 5
+dataset = datasets.Dataset(basedir='datasets')
+filenames = dataset.all_videos[:length].tolist()
+filenames.append('0ae1576c58393c78.mp4')  # two faces here
 
 filepaths = []
-for k in range(length):
-    filename = dataset.all_videos[k]
+for k in range(len(filenames)):
+    filename = filenames[k]
     filepath = f'datasets/train/videos/{filename}'
     filepaths.append(filepath)
 
