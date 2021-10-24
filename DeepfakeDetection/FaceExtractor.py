@@ -1,9 +1,20 @@
-import os
+try:
+    import ParentImport
+    import datasets
 
+    from network.models import model_selection
+    from detect_from_video import predict_with_model
+
+except ModuleNotFoundError:
+    from . import ParentImport
+    from .. import datasets
+
+    from .network.models import model_selection
+    from .detect_from_video import predict_with_model
+
+import os
 import numpy as np
 
-import ParentImport
-import datasets
 import torchvision.transforms as transforms
 import face_recognition
 import pandas as pd
@@ -17,8 +28,6 @@ import cv2
 from PIL import Image
 from tqdm.auto import tqdm
 from matplotlib.pyplot import imshow
-from network.models import model_selection
-from detect_from_video import predict_with_model
 # from trainer import Trainer
 
 
@@ -204,6 +213,126 @@ class FaceExtractor(object):
             min_top, min_left, max_right, max_bottom
         )
 
+    @classmethod
+    def faces_from_video(
+        cls, np_frames, filename, rescale, export_size=256
+    ):
+        num_faces, face_mapping = cls.fill_face_maps(np_frames, 1)
+        faces_df = cls.face_map_to_df(
+            np_frames, num_faces, face_mapping,
+            every_n_frames=1, current_rescale=1,
+            filename=filename
+        )
+
+        group_face_frames = cls.collate_faces(faces_df, num_faces)
+        sorted_face_frames = cls.sort_face_frames(
+            group_face_frames, num_faces=num_faces
+        )
+
+        excluded_faces = cls.exclude_faces(sorted_face_frames)
+        face_image_map, shift_left = {}, 0
+
+        for face_no in range(num_faces):
+            if face_no in excluded_faces:
+                shift_left += 1
+                continue
+
+            face_images = []
+            shifted_face_no = max(face_no - shift_left, 0)
+            face_image_map[shifted_face_no] = face_images
+            face_rows = sorted_face_frames[face_no]
+
+            for i, row in enumerate(face_rows):
+                frame = np_frames[i]
+                top, left, right, bottom = cls.extract_coords(
+                    i, face_rows, every_n_frames=1
+                )
+
+                face_crop, ratio = cls.get_square_face(
+                    frame, top, left, right, bottom,
+                    export_size=export_size, rescale=rescale,
+                    rescale_ratios=None
+                )
+
+                face_images.append(face_crop)
+
+        return face_image_map
+
+    @staticmethod
+    def sort_face_frames(face_frames, num_faces):
+        left_positions = []
+        for face_no in tuple(face_frames.keys()):
+            left_positions.append(
+                face_frames[face_no][0]["left"]
+            )
+
+        left_positions = np.array(left_positions)
+        sort_keys = np.argsort(left_positions)
+        sorted_face_frames = {
+            sort_keys[k]: face_frames[k]
+            for k in range(num_faces)
+        }
+
+        return sorted_face_frames
+
+    @staticmethod
+    def face_map_to_df(
+        np_frames, max_faces, face_mapping, every_n_frames,
+        current_rescale, filename
+    ):
+        face_coords_df = pd.DataFrame(columns=[
+            'filename', 'frames', 'face_no', 'num_faces',
+            'top', 'right', 'bottom', 'left'
+        ])
+
+        detections, column = 0, 0
+
+        for frame_no in face_mapping:
+            image = np_frames[frame_no // every_n_frames]
+            face_locations = face_recognition.face_locations(image)
+            faces = len(face_locations)
+
+            if faces > 0:
+                detections += 1
+
+            max_faces = max(max_faces, faces)
+            num_faces = len(face_locations)
+
+            for face_no in range(len(face_locations)):
+                face_location = face_locations[face_no]
+                top, right, bottom, left = face_location
+
+                top = int(top / current_rescale)
+                right = int(right / current_rescale)
+                bottom = int(bottom / current_rescale)
+                left = int(left / current_rescale)
+
+                face_coords_df.loc[column] = [
+                    filename, frame_no, face_no, num_faces,
+                    top, right, bottom, left
+                ]
+
+                column += 1
+
+        return face_coords_df
+
+    @staticmethod
+    def fill_face_maps(np_frames, interval):
+        face_mapping = {}
+        max_faces = 0
+
+        for i in range(len(np_frames)):
+            image = np_frames[i]
+            frame_no = interval * i
+            face_locations = face_recognition.face_locations(image)
+            face_mapping[frame_no] = face_locations
+
+            num_faces = len(face_locations)
+            # print('faces', num_faces, max_faces)
+            max_faces = max(max_faces, num_faces)
+
+        return max_faces, face_mapping
+
     @staticmethod
     def collate_faces(video_frame_rows, num_faces):
         face_frames = {}
@@ -276,8 +405,9 @@ class FaceExtractor(object):
 
         return face_frames
 
+    @staticmethod
     def square_coords(
-        self, top, left, right, bottom,
+        top, left, right, bottom,
         x_scale, y_scale, rescale, image, shrink=False
     ):
         img_width = image.shape[1] / rescale
@@ -340,11 +470,87 @@ class FaceExtractor(object):
         right = (right / x_scale) + x_clip
         return top, left, right, bottom
 
+    @classmethod
+    def get_square_face(
+        cls, frame, top, left, right, bottom,
+        rescale_ratios=None, export_size=256, rescale=1
+    ):
+        img_width = frame.shape[1]
+        img_height = frame.shape[0]
+
+        area = (bottom - top) * (right - left)
+        area_root = area ** 0.5
+        buffer = int(area_root // 7)
+
+        x_scale, y_scale = 1, 1
+        if rescale_ratios is not None:
+            x_scale, y_scale = rescale_ratios
+
+        b_top = max(top - buffer / y_scale, 0)
+        b_left = max(left - buffer / x_scale, 0)
+        b_right = min(right + buffer / x_scale, img_width)
+        b_bottom = min(bottom + buffer / y_scale, img_height)
+
+        # get square coordinates
+        s_top, s_left, s_right, s_bottom = cls.square_coords(
+            top, left, right, bottom,
+            x_scale, y_scale, rescale, frame
+        )
+        # find largest bounding box between square, buffer
+        f_top, f_left, f_right, f_bottom = (
+            min(b_top, s_top), min(b_left, s_left),
+            max(b_right, s_right), max(b_bottom, s_bottom)
+        )
+        # get square coordinates of largest bounding box
+        f_top, f_left, f_right, f_bottom = cls.square_coords(
+            f_top, f_left, f_right, f_bottom,
+            x_scale, y_scale, rescale, frame, shrink=True
+        )
+
+        f_top = int(f_top * rescale)
+        f_left = int(f_left * rescale)
+        f_right = int(f_right * rescale)
+        f_bottom = int(f_bottom * rescale)
+        face_crop = frame[f_top:f_bottom, f_left:f_right]
+        # print('SCALE', x_scale, y_scale)
+
+        # new_width = int(face_crop.shape[1] * x_scale)
+        # new_height = int(face_crop.shape[0] * y_scale)
+        scaled_width = int((f_right - f_left) * x_scale)
+        scaled_height = int((f_bottom - f_top) * y_scale)
+        ratio = scaled_width / scaled_height
+        """
+        face_crop = cv2.resize(
+            face_crop, (scaled_width, scaled_height)
+        )
+        """
+        dimensions = (scaled_width, scaled_height)
+        face_crop = cv2.resize(face_crop, dimensions)
+        width, height = face_crop.shape[1], face_crop.shape[0]
+
+        # print('FF', face_crop.shape, width, height)
+        clip = abs(width - height) // 2
+        # print(clip, width > height)
+
+        if clip != 0:
+            if width > height:
+                face_crop = face_crop[:, clip:-clip]
+            else:
+                face_crop = face_crop[clip:-clip, :]
+
+        dimensions = (export_size, export_size)
+        # print('NEW SHAPE', face_crop.shape)
+        face_crop = cv2.resize(face_crop, dimensions)
+        return face_crop, ratio
+
     def export_face_frames(
         self, face_frames, num_faces, rescale_ratios,
         np_frames, base_dir, face_records, filename,
-        excluded_faces=(), export_size=256
+        excluded_faces=(), export_size=256, rescale=None
     ):
+        if rescale is None:
+            rescale = self.rescale
+
         shift_left = 0
         bad_ratios = []
 
@@ -362,8 +568,6 @@ class FaceExtractor(object):
                 frame_no = row['frames']
                 index = frame_no // self.every_n_frames
                 frame = np_frames[index]
-                img_width = frame.shape[1]
-                img_height = frame.shape[0]
                 # print('ROW', row)
 
                 top, left, right, bottom = self.extract_coords(
@@ -373,70 +577,11 @@ class FaceExtractor(object):
                 if top == float('inf'):
                     continue
 
-                area = (bottom - top) * (right - left)
-                area_root = area ** 0.5
-                buffer = int(area_root // 7)
-
-                x_scale, y_scale = 1, 1
-                if rescale_ratios is not None:
-                    x_scale, y_scale = rescale_ratios
-
-                rescale = self.rescale
-                b_top = max(top - buffer / y_scale, 0)
-                b_left = max(left - buffer / x_scale, 0)
-                b_right = min(right + buffer / x_scale, img_width)
-                b_bottom = min(bottom + buffer / y_scale, img_height)
-
-                # get square coordinates
-                s_top, s_left, s_right, s_bottom = self.square_coords(
-                    top, left, right, bottom,
-                    x_scale, y_scale, rescale, frame
+                face_crop, ratio = self.get_square_face(
+                    frame, top, left, right, bottom,
+                    rescale_ratios=rescale_ratios,
+                    export_size=export_size, rescale=rescale
                 )
-                # find largest bounding box between square, buffer
-                f_top, f_left, f_right, f_bottom = (
-                    min(b_top, s_top), min(b_left, s_left),
-                    max(b_right, s_right), max(b_bottom, s_bottom)
-                )
-                # get square coordinates of largest bounding box
-                f_top, f_left, f_right, f_bottom = self.square_coords(
-                    f_top, f_left, f_right, f_bottom,
-                    x_scale, y_scale, rescale, frame, shrink=True
-                )
-
-                f_top = int(f_top * rescale)
-                f_left = int(f_left * rescale)
-                f_right = int(f_right * rescale)
-                f_bottom = int(f_bottom * rescale)
-                face_crop = frame[f_top:f_bottom, f_left:f_right]
-                # print('SCALE', x_scale, y_scale)
-
-                # new_width = int(face_crop.shape[1] * x_scale)
-                # new_height = int(face_crop.shape[0] * y_scale)
-                scaled_width = int((f_right - f_left) * x_scale)
-                scaled_height = int((f_bottom - f_top) * y_scale)
-                ratio = scaled_width / scaled_height
-                """
-                face_crop = cv2.resize(
-                    face_crop, (scaled_width, scaled_height)
-                )
-                """
-                dimensions = (scaled_width, scaled_height)
-                face_crop = cv2.resize(face_crop, dimensions)
-                width, height = face_crop.shape[1], face_crop.shape[0]
-
-                # print('FF', face_crop.shape, width, height)
-                clip = abs(width - height) // 2
-                # print(clip, width > height)
-
-                if clip != 0:
-                    if width > height:
-                        face_crop = face_crop[:, clip:-clip]
-                    else:
-                        face_crop = face_crop[clip:-clip, :]
-
-                dimensions = (export_size, export_size)
-                # print('NEW SHAPE', face_crop.shape)
-                face_crop = cv2.resize(face_crop, dimensions)
 
                 if (ratio > 1.05) or (ratio < 0.95):
                     bad_ratios.append((face_no, ratio))
@@ -542,25 +687,16 @@ class FaceExtractor(object):
                 video_frame_rows, num_faces
             )
 
-            left_positions = []
-            for face_no in tuple(face_frames.keys()):
-                left_positions.append(
-                    face_frames[face_no][0]["left"]
-                )
-
-            left_positions = np.array(left_positions)
-            sort_keys = np.argsort(left_positions)
-            sorted_face_frames = {
-                sort_keys[k]: face_frames[k]
-                for k in range(num_faces)
-            }
-
+            sorted_face_frames = self.sort_face_frames(
+                face_frames, num_faces=num_faces
+            )
             excluded_faces = self.exclude_faces(sorted_face_frames)
 
             self.export_face_frames(
                 sorted_face_frames, num_faces, rescale_ratios,
                 np_frames, base_dir, excluded_faces=excluded_faces,
                 filename=filename, face_records=face_records,
+                rescale=self.rescale, export_size=export_size
             )
 
         # base_faces.to_csv(output_path, index=False)

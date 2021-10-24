@@ -1,7 +1,18 @@
+try:
+    import model
+    import utils
+
+    from constants import model_params, base_data_path
+
+except ModuleNotFoundError:
+    from . import model
+    from . import utils
+
+    from . constants import model_params, base_data_path
+
 import bisect
 import os
 
-import model
 import numpy as np
 import torch.nn as nn
 import tensorflow as tf
@@ -10,7 +21,6 @@ import torch.multiprocessing as mp
 import pandas as pd
 import random
 import torch
-import utils
 import time
 import math
 import re
@@ -18,7 +28,6 @@ import re
 from datetime import timedelta
 from sklearn.model_selection import train_test_split
 from torch.multiprocessing import Queue, Process, set_start_method
-from constants import model_params, base_data_path
 from datetime import datetime as Datetime
 from tqdm.auto import tqdm
 

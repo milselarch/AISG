@@ -8,10 +8,16 @@ import librosa.filters
 import multiprocessing
 import soundfile as sf
 
+try:
+    from constants import model_params, base_data_path
+    from constants import *
+except ModuleNotFoundError:
+    from .constants import model_params, base_data_path
+    from .constants import *
+
 from sklearn.metrics import f1_score, accuracy_score
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from constants import model_params, base_data_path
 from scipy import signal
 from scipy.io import wavfile
 from skopt import gp_minimize
@@ -19,8 +25,6 @@ from skopt.space import Real
 from functools import partial
 from pydub import AudioSegment
 # from keras.utils import multi_gpu_model
-
-from constants import *
 
 # Set a random seed for numpy for reproducibility
 np.random.seed(42)

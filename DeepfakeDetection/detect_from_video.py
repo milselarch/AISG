@@ -11,6 +11,14 @@ python detect_from_video.py
 
 Author: Andreas Rössler
 """
+
+try:
+    from network.models import model_selection
+    from dataset.transform import xception_default_data_transforms
+except ModuleNotFoundError:
+    from .network.models import model_selection
+    from .dataset.transform import xception_default_data_transforms
+
 import os
 import argparse
 import cv2
@@ -21,9 +29,6 @@ import torch.nn as nn
 from os.path import join
 from PIL import Image as pil_image
 from tqdm import tqdm
-
-from network.models import model_selection
-from dataset.transform import xception_default_data_transforms
 
 
 def get_boundingbox(

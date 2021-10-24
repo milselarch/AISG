@@ -1,16 +1,19 @@
 """
-
 Author: Andreas Rössler
 """
+
+try:
+    from network.xception import xception, xception_concat
+except ModuleNotFoundError:
+    from .xception import xception, xception_concat
+
 import os
 import argparse
 
-
 import torch
-#import pretrainedmodels
+# import pretrainedmodels
 import torch.nn as nn
 import torch.nn.functional as F
-from network.xception import xception, xception_concat
 import math
 import torchvision
 

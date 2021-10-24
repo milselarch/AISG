@@ -2,7 +2,10 @@ import os
 import numpy as np
 import yaml
 
-config_yaml_file_name = 'config.yml'
+import pathlib
+base_dir = pathlib.Path(__file__).parent.resolve()
+# print(f'BASE DIR {base_dir}')
+config_yaml_file_name = f'{base_dir}/config.yml'
 
 class HParams(object):
     def __init__(self, **kwargs):
