@@ -1,12 +1,23 @@
-import numpy as np
+try:
+    import ParentImport
 
-import ParentImport
+    from Dataset import Dataset
+    from network.classifier import *
+    from network.transform import mesonet_data_transforms
+
+except ModuleNotFoundError:
+    from . import ParentImport
+
+    from .Dataset import Dataset
+    from .network.classifier import *
+    from .network.transform import mesonet_data_transforms
+
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torchvision
 import torch.optim as optim
-import tensorflow as tf
 import argparse
 import time
 import cv2
@@ -16,10 +27,7 @@ from tqdm.auto import tqdm
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
-from network.classifier import *
-from network.transform import mesonet_data_transforms
 from datetime import datetime as Datetime
-from Dataset import Dataset
 
 torch.cuda.empty_cache()
 
@@ -31,7 +39,7 @@ class MesoTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01,
-        use_inception=False
+        use_inception=False, preload_path=None
     ):
         self.date_stamp = self.make_date_stamp()
         self.use_inception = use_inception
@@ -81,8 +89,12 @@ class MesoTrainer(object):
             self.optimizer, step_size=5, gamma=0.5
         )
 
-        if load_dataset:
-            self.dataset = Dataset(seed=seed)
+        self.dataset = Dataset(seed=seed, load=load_dataset)
+        if preload_path is not None:
+            self.load_model(preload_path)
+
+    def transform(self, image):
+        return self.dataset.transform(image)
 
     def load_model(self, model_path, eval_mode=True):
         self.model.load_state_dict(torch.load(model_path))
@@ -163,7 +175,28 @@ class MesoTrainer(object):
         prediction = predictions[0][0]
         return prediction
 
-    def batch_predict(self, batch_x, to_numpy=True):
+    def predict_images(self, image_list, to_numpy=True):
+        images_preds = []
+
+        for input_arr in image_list:
+            assert type(input_arr) is torch.Tensor
+            input_arr = input_arr.to(self.device)
+            if len(input_arr.shape) == 3:
+                input_arr = torch.unsqueeze(input_arr, 0)
+
+            preds = self.batch_predict(input_arr)
+            preds = preds.flatten()
+            assert len(preds) == 1
+            images_preds.append(preds[0])
+
+        if to_numpy:
+            images_preds = np.array(images_preds)
+
+        return images_preds
+
+    def batch_predict(
+        self, batch_x, to_numpy=True
+    ):
         if type(batch_x) is str:
             batch_x = [batch_x]
 

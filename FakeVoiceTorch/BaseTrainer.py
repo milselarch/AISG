@@ -15,7 +15,7 @@ import os
 
 import numpy as np
 import torch.nn as nn
-import tensorflow as tf
+# import tensorflow as tf
 import torch.optim as optim
 import torch.multiprocessing as mp
 import pandas as pd

@@ -1,11 +1,17 @@
+try:
+    import datasets
+    import loader
+
+except ModuleNotFoundError:
+    from . import datasets
+    from . import loader
+
 import ast
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import datasets
 import imagehash
-import loader
 import cv2
 import os
 

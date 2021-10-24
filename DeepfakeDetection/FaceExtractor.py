@@ -233,9 +233,12 @@ class FaceExtractor(object):
             group_face_frames, num_faces=num_faces
         )
 
-        excluded_faces = cls.exclude_faces(sorted_face_frames)
-        face_image_map, shift_left = {}, 0
+        if len(sorted_face_frames) > 1:
+            excluded_faces = cls.exclude_faces(sorted_face_frames)
+        else:
+            excluded_faces = []
 
+        face_image_map, shift_left = {}, 0
         for face_no in range(num_faces):
             if face_no in excluded_faces:
                 shift_left += 1

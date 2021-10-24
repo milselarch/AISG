@@ -1,4 +1,12 @@
-import ParentImport
+try:
+    import ParentImport
+
+    from FaceAnalysis import FaceCluster
+
+except ModuleNotFoundError:
+    from . import ParentImport
+
+    from ..FaceAnalysis import FaceCluster
 
 import random
 import numpy as np
@@ -6,7 +14,6 @@ import pandas as pd
 
 from tqdm.auto import tqdm
 from torchvision import transforms
-from FaceAnalysis import FaceCluster
 from sklearn.model_selection import train_test_split
 from datetime import datetime as Datetime
 from PIL import Image
