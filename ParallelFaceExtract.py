@@ -38,11 +38,9 @@ class ParallelFaceExtract(object):
         return self.size == 0
 
     def pop(self):
-        filepath = None
-        for filepath in self.extractions:
-            break
-
-        if filepath is None:
+        try:
+            filepath = list(self.extractions.keys())[0]
+        except IndexError:
             return None
 
         face_image_map = self.extractions[filepath]
