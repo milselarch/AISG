@@ -77,7 +77,7 @@ class ParallelFaceExtract(object):
 
     def start(
         self, filepaths=None, base_dir=None,
-        num_processes=6, max_cache_size=16, verbose=False,
+        num_processes=8, max_cache_size=16, verbose=False,
         every_n_frames=20
     ):
         if filepaths is None:

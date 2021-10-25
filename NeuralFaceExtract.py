@@ -1,3 +1,8 @@
+try:
+    from DeepfakeDetection.FaceExtractor import FaceExtractor
+except ModuleNotFoundError:
+    from .DeepfakeDetection.FaceExtractor import FaceExtractor
+
 import loader
 import torch
 import numpy as np
@@ -6,7 +11,6 @@ import cv2
 import os
 
 from facenet_pytorch import MTCNN, InceptionResnetV1
-from DeepfakeDetection.FaceExtractor import FaceExtractor
 from torch.utils.data import DataLoader
 from PIL import Image, ImageDraw
 from torchvision import datasets
@@ -69,14 +73,19 @@ class NeuralFaceExtract(object):
 
     def process_filepaths(
         self, filepaths, callback=lambda *args: None,
-        every_n_frames=20, batch_size=16
+        every_n_frames=20, batch_size=16, base_dir=None
     ):
         def fill_face_maps(frames, interval):
             return self.fill_face_maps(
                 frames, interval, batch_size=batch_size
             )
 
-        for filepath in tqdm(filepaths):
+        pbar = tqdm(filepaths)
+
+        for filepath in pbar:
+            if base_dir is not None:
+                filepath = f'{base_dir}/{filepath}'
+
             video_cap = cv2.VideoCapture(filepath)
             width_in = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height_in = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -99,4 +108,4 @@ class NeuralFaceExtract(object):
                 fill_face_maps=fill_face_maps
             )
 
-            callback(filepath, face_image_map)
+            callback(filepath, face_image_map, pbar)
