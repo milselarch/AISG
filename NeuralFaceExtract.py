@@ -50,6 +50,12 @@ class NeuralFaceExtract(object):
             bboxes = frame_face_boxes[k]
             bconfs = face_confs[k]
 
+            if bboxes is None:
+                print(f'BBOXES IS NONE')
+                break
+
+            assert bconfs is not None
+            assert bboxes is not None
             for bbox, bconf in zip(bboxes, bconfs):
                 if bconf < 0.9:
                     # face detection confidence threshold
