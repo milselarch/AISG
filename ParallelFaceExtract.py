@@ -12,6 +12,9 @@ from loader import load_video
 from multiprocessing import Process, Manager, Queue
 from itertools import repeat
 
+def kwargify(**kwargs):
+    return kwargs
+
 class ParallelFaceExtract(object):
     def __init__(self, filepaths=None):
         self.filepaths = filepaths
@@ -61,7 +64,8 @@ class ParallelFaceExtract(object):
 
     def start(
         self, filepaths=None, base_dir=None,
-        num_processes=6, max_cache_size=16, verbose=False
+        num_processes=6, max_cache_size=16, verbose=False,
+        every_n_frames=20
     ):
         if filepaths is None:
             filepaths = self.filepaths
@@ -79,11 +83,14 @@ class ParallelFaceExtract(object):
         self.extractions = manager.dict()
 
         for k in range(num_processes):
+            kwargs = kwargify(
+                process_no=k, input_queue=self.filepath_queue,
+                shared_dict=self.extractions,
+                max_cache_size=max_cache_size, verbose=verbose,
+                every_n_frames=every_n_frames
+            )
             process = Process(
-                target=self.process_filepaths, args=(
-                    k, self.filepath_queue, self.extractions,
-                    max_cache_size, verbose
-                )
+                target=self.process_filepaths, kwargs=kwargs
             )
 
             processes.append(process)
@@ -103,7 +110,7 @@ class ParallelFaceExtract(object):
     @staticmethod
     def process_filepaths(
         process_no, input_queue, shared_dict, max_cache_size,
-        verbose=False
+        verbose=False, every_n_frames=20
     ):
         while True:
             if len(shared_dict) > max_cache_size:
@@ -132,14 +139,18 @@ class ParallelFaceExtract(object):
             if min(width_in, height_in) < 700:
                 scale = 1
 
+            print(f'{filepath} SCALE {scale}')
             vid_obj = load_video(
-                video_cap, every_n_frames=20, scale=scale
+                video_cap, every_n_frames=every_n_frames,
+                scale=scale
             )
 
             vid_obj = vid_obj.auto_resize()
             np_frames = vid_obj.out_video
             face_image_map = FaceExtractor.faces_from_video(
-                np_frames, rescale=1, filename=filepath
+                np_frames, rescale=1, filename=filepath,
+                every_n_frames=every_n_frames,
+                coords_scale=scale
             )
 
             if verbose:

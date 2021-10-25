@@ -89,6 +89,24 @@ class Area(object):
         return squared_dist ** 0.5
 
 
+class FaceImage(object):
+    def __init__(
+        self, image, coords: tuple, face_no: int,
+        frame_no: int
+    ):
+        assert len(coords) == 4
+        self.image = image
+        self.coords = coords
+        self.face_no = face_no
+        self.frame_no = frame_no
+
+    def rescale_coords(self, rescale):
+        assert rescale > 0
+        coords = np.array(self.coords)
+        coords = (coords * rescale).astype(int)
+        coords = tuple(coords.tolist())
+        self.coords = coords
+
 class FaceRecords(object):
     def __init__(self):
         dt = datetime.datetime.now()
@@ -219,12 +237,15 @@ class FaceExtractor(object):
 
     @classmethod
     def faces_from_video(
-        cls, np_frames, filename, rescale, export_size=256
+        cls, np_frames, filename, rescale, export_size=256,
+        every_n_frames=20, coords_scale=1
     ):
-        num_faces, face_mapping = cls.fill_face_maps(np_frames, 1)
+        num_faces, face_mapping = cls.fill_face_maps(
+            np_frames, interval=every_n_frames
+        )
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
-            every_n_frames=1, current_rescale=1,
+            every_n_frames=every_n_frames, current_rescale=1,
             filename=filename
         )
 
@@ -238,30 +259,39 @@ class FaceExtractor(object):
         else:
             excluded_faces = []
 
-        face_image_map, shift_left = {}, 0
+        face_image_map, shifted_face_no = {}, 0
+
         for face_no in range(num_faces):
             if face_no in excluded_faces:
-                shift_left += 1
                 continue
 
-            face_images = []
-            shifted_face_no = max(face_no - shift_left, 0)
+            face_images = {}
             face_image_map[shifted_face_no] = face_images
-            face_rows = sorted_face_frames[face_no]
+            face_rows = sorted_face_frames[shifted_face_no]
 
             for i, row in enumerate(face_rows):
                 frame = np_frames[i]
-                top, left, right, bottom = cls.extract_coords(
-                    i, face_rows, every_n_frames=1
+                coords = cls.extract_coords(
+                    i, face_rows, every_n_frames=every_n_frames
                 )
 
+                top, left, right, bottom = coords
                 face_crop, ratio = cls.get_square_face(
                     frame, top, left, right, bottom,
                     export_size=export_size, rescale=rescale,
                     rescale_ratios=None
                 )
 
-                face_images.append(face_crop)
+                frame_no = row['frames']
+                face_image = FaceImage(
+                    image=face_crop, coords=coords,
+                    face_no=shifted_face_no, frame_no=frame_no
+                )
+
+                face_image.rescale_coords(1.0 / coords_scale)
+                face_images[frame_no] = face_image
+
+            shifted_face_no += 1
 
         return face_image_map
 

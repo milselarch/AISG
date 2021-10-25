@@ -113,7 +113,7 @@ class VideoArray(object):
 
     def auto_resize(self, *args, **kwargs):
         resolution = (self.width, self.height)
-        coords = self.cut_blackout(self.out_video, *args, **kwargs)
+        coords = self.cut_blackout2(self.out_video, *args, **kwargs)
         x_start, x_end, y_start, y_end = coords.to_tuple()
         # print(f'COORDS {coords}')
         resized_frames = []
@@ -131,6 +131,68 @@ class VideoArray(object):
             resized_frames, width=self.width, height=self.height,
             frames=self.frames, rescale=self.rescale, name=self.name
         )
+
+    @staticmethod
+    def cut_blackout2(images=None, samples=1):
+        sample_interval = len(images) // (samples + 2)
+        x_starts, y_starts = [], []
+        x_ends, y_ends = [], []
+
+        for k in range(samples):
+            interval = (sample_interval + 1) * k
+            frame = images[interval]
+
+            if len(frame.shape) == 3:
+                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                assert len(frame.shape) == 2
+                gray_frame = frame
+
+            width, height = frame.shape[1], frame.shape[0]
+
+            x_start = 0
+            for x_start in range(width):
+                v_stripe = gray_frame[:, x_start]
+                v_stripe = v_stripe.flatten()
+                max_val = np.max(v_stripe)
+                if max_val > 0:
+                    break
+
+            x_back_end = 0
+            for x_back_end in range(width):
+                v_stripe = gray_frame[:, width-x_back_end-1]
+                v_stripe = v_stripe.flatten()
+                max_val = np.max(v_stripe)
+                if max_val > 0:
+                    break
+
+            y_start = 0
+            for y_start in range(height):
+                h_stripe = gray_frame[y_start, :]
+                h_stripe = h_stripe.flatten()
+                max_val = np.max(h_stripe)
+                if max_val > 0:
+                    break
+
+            y_back_end = 0
+            for y_back_end in range(height):
+                h_stripe = gray_frame[height-y_back_end-1, :]
+                h_stripe = h_stripe.flatten()
+                max_val = np.max(h_stripe)
+                if max_val > 0:
+                    break
+
+            x_starts.append(x_start)
+            x_ends.append(width-x_back_end)
+            y_starts.append(y_start)
+            y_ends.append(height-y_back_end)
+
+        x_start = int(np.min(x_starts))
+        x_end = int(np.max(x_ends))
+        y_start = int(np.min(y_starts))
+        y_end = int(np.max(y_ends))
+
+        return BoundingBox(x_start, x_end, y_start, y_end)
 
     def cut_blackout(
         self, images=None, samples=1, intervals=5, roll=4

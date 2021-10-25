@@ -7,10 +7,11 @@ from DeepfakeDetection.FaceExtractor import FaceExtractor
 from ParallelFaceExtract import ParallelFaceExtract
 from PIL import Image
 
-length = 5
 dataset = datasets.Dataset(basedir='datasets')
-filenames = dataset.all_videos[:length].tolist()
+filenames = dataset.all_videos[:5].tolist()
 filenames.append('0ae1576c58393c78.mp4')  # two faces here
+filenames.append('bb34433231a222e5.mp4')  # black background
+filenames.append('0c0c3a74ba96c692.mp4')
 
 filepaths = []
 for k in range(len(filenames)):
@@ -22,7 +23,7 @@ for k in range(len(filenames)):
 extractor = ParallelFaceExtract(filepaths=filepaths)
 extractor.start(filepaths)
 
-for k in tqdm(range(length)):
+for k in tqdm(range(len(filenames))):
     extractions = extractor.extractions
     while len(extractions) == 0:
         print(extractions)
@@ -48,7 +49,10 @@ for k in tqdm(range(length)):
 
     for face_no in face_image_map:
         faces = face_image_map[face_no]
-        for i, frame in enumerate(faces):
+        for i, frame_no in enumerate(faces):
+            face = faces[frame_no]
+            frame = face.image
+
             im = Image.fromarray(frame)
-            path = f'{face_dir}/{face_no}-{i}.jpg'
+            path = f'{face_dir}/{face_no}-{frame_no}.jpg'
             im.save(path)
