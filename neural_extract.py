@@ -1,29 +1,63 @@
-import loader
-import torch
-import numpy as np
-import pandas as pd
+import datasets
+import time
 import os
 
-from facenet_pytorch import MTCNN, InceptionResnetV1
-from torch.utils.data import DataLoader
-from torchvision import datasets
+from tqdm.auto import tqdm
+from DeepfakeDetection.FaceExtractor import FaceExtractor
+from NeuralFaceExtract import NeuralFaceExtract
+from PIL import Image
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-print('Running on device: {}'.format(device))
+dataset = datasets.Dataset(basedir='datasets')
+filenames = dataset.all_videos[:5].tolist()
+filenames.append('0ae1576c58393c78.mp4')  # two faces here
+filenames.append('bb34433231a222e5.mp4')  # black background
+filenames.append('0c0c3a74ba96c692.mp4')
 
-mtcnn = MTCNN(
-    image_size=160, margin=0, min_face_size=20,
-    thresholds=[0.6, 0.7, 0.7], factor=0.709, post_process=True,
-    device=device
+def callback(filepath, face_image_map):
+    name = filepath
+    if '/' in filepath:
+        name = name[name.rindex('/')+1:]
+
+    name = name[:name.index('.')]
+    print(f'NAME {name}')
+
+    export_dir = 'datasets-local/mtcnn-faces'
+    face_dir = f'{export_dir}/{name}'
+
+    if not os.path.exists(export_dir):
+        os.mkdir(export_dir)
+    if not os.path.exists(face_dir):
+        os.mkdir(face_dir)
+
+    # print(f'FACE IMAGE MAP {face_image_map}')
+
+    for face_no in face_image_map:
+        faces = face_image_map[face_no]
+        for i, frame_no in enumerate(faces):
+            face = faces[frame_no]
+            frame = face.image
+
+            im = Image.fromarray(frame)
+            path = f'{face_dir}/{face_no}-{frame_no}.jpg'
+            im.save(path)
+
+
+filepaths = []
+
+for k in range(len(filenames)):
+    filename = filenames[k]
+    filepath = f'datasets/train/videos/{filename}'
+    filepaths.append(filepath)
+
+start_time = time.perf_counter()
+# input(f'IN FILEPATHS {filepaths}')
+extractor = NeuralFaceExtract()
+extractor.process_filepaths(
+    filepaths, every_n_frames=20, batch_size=16,
+    callback=callback
 )
 
-filename = '0a8e8e7b229fe1fc.mp4'
-filepath = f'~/projects/AISG/datasets/train/videos/{filename}'
-
-video = loader.load_video(filepath, every_n_frames=20)
-image = video.out_video[0]
-
-bbox = mtcnn.detect(image)
-print(f'bbox = {bbox}')
-
+end_time = time.perf_counter()
+duration = end_time - start_time
+print(f'extract duration: {duration}')
 

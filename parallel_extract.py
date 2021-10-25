@@ -19,6 +19,7 @@ for k in range(len(filenames)):
     filepath = f'datasets/train/videos/{filename}'
     filepaths.append(filepath)
 
+start_time = time.perf_counter()
 # input(f'IN FILEPATHS {filepaths}')
 extractor = ParallelFaceExtract(filepaths=filepaths)
 extractor.start(filepaths)
@@ -56,3 +57,7 @@ for k in tqdm(range(len(filenames))):
             im = Image.fromarray(frame)
             path = f'{face_dir}/{face_no}-{frame_no}.jpg'
             im.save(path)
+
+end_time = time.perf_counter()
+duration = end_time - start_time
+print(f'extract duration: {duration}')

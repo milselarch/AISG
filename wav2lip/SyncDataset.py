@@ -2,6 +2,7 @@ import audio
 import torch
 import os, random, cv2, argparse
 import torch.backends.cudnn as cudnn
+import pandas as pd
 import numpy as np
 
 from tqdm import tqdm
@@ -17,8 +18,11 @@ syncnet_T = 5
 syncnet_mel_step_size = 16
 
 class Dataset(object):
-    def __init__(self, split):
-        self.all_videos = get_image_list(args.data_root, split)
+    def __init__(self):
+        self.real_samples = {}
+        self.fake_samples = {}
+
+
 
     @staticmethod
     def get_frame_id(frame):
@@ -94,7 +98,6 @@ class Dataset(object):
             try:
                 wavpath = join(vidname, "audio.wav")
                 wav = audio.load_wav(wavpath, hparams.sample_rate)
-
                 orig_mel = audio.melspectrogram(wav).T
             except Exception as e:
                 continue

@@ -798,6 +798,15 @@ def preprocess_and_save_audio_from_ray_parallel(
 def process(*args, **kwargs):
     return process_audio_files_inference(*args, **kwargs)
 
+def load_melspectrogram(path):
+    audio_array, sample_rate = librosa.load(path, sr=16000)
+    trim_audio_array, index = librosa.effects.trim(audio_array)
+    mel_spec_array = melspectrogram(
+        trim_audio_array, hparams=hparams
+    ).T
+
+    return mel_spec_array
+
 def process_audio_files_inference(
     filename, dirpath, mode, normalize=False
 ):
@@ -807,16 +816,7 @@ def process_audio_files_inference(
         filename = os.path.join(*filename)
 
     path = os.path.join(dirpath, filename)
-
-    audio_array, sample_rate = librosa.load(path, sr=16000)
-    if normalize:
-        rms = np.sqrt(np.mean(audio_array ** 2))
-        audio_array /= rms
-
-    trim_audio_array, index = librosa.effects.trim(audio_array)
-    mel_spec_array = melspectrogram(
-        trim_audio_array, hparams=hparams
-    ).T
+    mel_spec_array = load_melspectrogram(path)
 
     # https://stackoverflow.com/questions/57072513/
     duration = get_duration(filename)
