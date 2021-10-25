@@ -208,12 +208,13 @@ class MesoTrainer(object):
             )
 
         if type(batch_x) is np.ndarray:
-            torch_batch_x = torch.tensor(batch_x).to(self.device)
+            torch_batch_x = torch.tensor(batch_x)
         else:
             assert type(batch_x) is torch.Tensor
             torch_batch_x = batch_x
 
         self.model.eval()
+        torch_batch_x = torch_batch_x.to(self.device)
         preds = self.model(torch_batch_x)
         if to_numpy:
             preds = preds.detach().cpu().numpy()
