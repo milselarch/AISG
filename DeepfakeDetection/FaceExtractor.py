@@ -238,10 +238,11 @@ class FaceExtractor(object):
     @classmethod
     def faces_from_video(
         cls, np_frames, filename, rescale, export_size=256,
-        every_n_frames=20, coords_scale=1
+        every_n_frames=20, coords_scale=1, detector=None
     ):
         num_faces, face_mapping = cls.fill_face_maps(
-            np_frames, interval=every_n_frames
+            np_frames, interval=every_n_frames,
+            detector=detector
         )
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
@@ -354,14 +355,17 @@ class FaceExtractor(object):
         return face_coords_df
 
     @staticmethod
-    def fill_face_maps(np_frames, interval):
+    def fill_face_maps(np_frames, interval, detector=None):
+        if detector is None:
+            detector = face_recognition.face_locations
+
         face_mapping = {}
         max_faces = 0
 
         for i in range(len(np_frames)):
             image = np_frames[i]
             frame_no = interval * i
-            face_locations = face_recognition.face_locations(image)
+            face_locations = detector(image)
             face_mapping[frame_no] = face_locations
 
             num_faces = len(face_locations)

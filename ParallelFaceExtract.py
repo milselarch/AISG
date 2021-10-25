@@ -8,6 +8,7 @@ import queue as base_queue
 import time
 import cv2
 
+from mtcnn import MTCNN
 from loader import load_video
 from multiprocessing import Process, Manager, Queue
 from itertools import repeat
@@ -16,14 +17,21 @@ def kwargify(**kwargs):
     return kwargs
 
 class ParallelFaceExtract(object):
-    def __init__(self, filepaths=None):
+    def __init__(self, filepaths=None, use_mtcnn=False):
         self.filepaths = filepaths
         self.filepath_queue = Queue()
+        self.use_mtcnn = use_mtcnn
+
+        if use_mtcnn:
+            self.detector = MTCNN()
+        else:
+            self.detector = None
 
         self.manager = None
         self.extractions = None
         self.num_processes = None
         self.processes = None
+        self.total = None
         self.size = None
 
     @property
@@ -32,6 +40,13 @@ class ParallelFaceExtract(object):
             return True
 
         return len(self.extractions) == 0
+
+    @property
+    def completed(self):
+        if self.total is None:
+            return -1
+
+        return self.total - self.size
 
     @property
     def is_done(self):
@@ -74,6 +89,7 @@ class ParallelFaceExtract(object):
         assert filepaths is not None
         self.num_processes = num_processes
         self.size = len(filepaths)
+        self.total = self.size
 
         processes = []
         manager = Manager()
@@ -105,11 +121,31 @@ class ParallelFaceExtract(object):
             if verbose:
                 print(self.filepath_queue.qsize())
 
-    @staticmethod
+    def mtcnn_face_detect(self, image):
+        assert self.detector is not None
+        detections = self.detector.detect_faces(image)
+        print(f'DETECTING')
+        face_locations = []
+
+        for detection in detections:
+            bbox = detection['box']
+            x, y, width, height = bbox
+            top, bottom = y, y + height
+            left, right = x, x + width
+            coords = (top, right, bottom, left)
+            face_locations.append(coords)
+
+        return face_locations
+
     def process_filepaths(
-        process_no, input_queue, shared_dict, max_cache_size,
+        self, process_no, input_queue, shared_dict, max_cache_size,
         verbose=False, every_n_frames=20
     ):
+        if self.detector is not None:
+            detector = self.mtcnn_face_detect
+        else:
+            detector = None
+
         while True:
             if len(shared_dict) > max_cache_size:
                 time.sleep(0.2)
@@ -148,7 +184,7 @@ class ParallelFaceExtract(object):
             face_image_map = FaceExtractor.faces_from_video(
                 np_frames, rescale=1, filename=filepath,
                 every_n_frames=every_n_frames,
-                coords_scale=scale
+                coords_scale=scale, detector=detector
             )
 
             if verbose:
