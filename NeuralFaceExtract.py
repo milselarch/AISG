@@ -24,7 +24,7 @@ class NeuralFaceExtract(object):
             'cuda:0' if torch.cuda.is_available() else 'cpu'
         )
         self.mtcnn = MTCNN(
-            image_size=160, margin=0, min_face_size=100,
+            image_size=160, margin=0, min_face_size=50,
             thresholds=[0.6, 0.7, 0.7], factor=0.709,
             post_process=True, device=self.device
         )
@@ -58,6 +58,7 @@ class NeuralFaceExtract(object):
 
         # assert len(frame_face_boxes) == len(np_frames)
         max_faces, face_mapping = 0, {}
+        # print(frame_face_boxes)
 
         for k in range(len(frame_face_boxes)):
             frame_no = interval * k
@@ -68,8 +69,8 @@ class NeuralFaceExtract(object):
             bconfs = face_confs[k]
 
             if bboxes is None:
-                print(f'BBOXES IS NONE')
-                break
+                # print(f'BBOXES IS NONE')
+                continue
 
             assert bconfs is not None
             assert bboxes is not None
@@ -80,7 +81,7 @@ class NeuralFaceExtract(object):
 
                 bbox = bbox.astype(int)
                 bbox = np.clip(bbox, a_max=999999, a_min=0)
-                # print(f'BBOX {k} {bbox} {bconf}')
+                # print(f'BBOX {k} {frame_no} {bbox} {bconf}')
                 left, top, right, bottom = bbox
 
                 assert right > left

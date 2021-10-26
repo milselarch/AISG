@@ -14,7 +14,8 @@ dataset = datasets.Dataset(basedir='datasets')
 # filenames.append('0c0c3a74ba96c692.mp4')
 # f0d0282ba659ba75
 # f45a1fd86d66e669
-filenames = ['f45a1fd86d66e669.mp4']
+# b3889a24b7312d65
+filenames = ['b3889a24b7312d65.mp4']
 
 def callback(filepath, face_image_map, pbar):
     name = filepath
@@ -56,7 +57,7 @@ start_time = time.perf_counter()
 # input(f'IN FILEPATHS {filepaths}')
 extractor = NeuralFaceExtract()
 extractor.process_filepaths(
-    filepaths, every_n_frames=20, batch_size=16,
+    filepaths, every_n_frames=10, batch_size=16,
     callback=callback
 )
 

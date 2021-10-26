@@ -256,7 +256,7 @@ class FaceExtractor(object):
         if every_n_frames > 10:
             min_frames = 5
         else:
-            min_frames = 7
+            min_frames = 11
 
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
@@ -539,9 +539,8 @@ class FaceExtractor(object):
 
         area = (bottom - top) * (right - left)
         area_root = area ** 0.5
-        # buffer = int(area_root // 7)
+        buffer = int(area_root // 24)
         b_buffer = int(area_root // 12)
-        buffer = 0
 
         x_scale, y_scale = 1, 1
         if rescale_ratios is not None:
