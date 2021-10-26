@@ -138,6 +138,7 @@ class NeuralFaceExtract(object):
 
     def callback(self, filepath, face_image_map, pbar=None):
         if face_image_map is None:
+            print(f'VIDEO LOAD FAILED {filepath}')
             return False
 
         name = filepath
