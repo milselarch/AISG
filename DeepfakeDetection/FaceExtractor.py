@@ -539,8 +539,9 @@ class FaceExtractor(object):
 
         area = (bottom - top) * (right - left)
         area_root = area ** 0.5
-        buffer = int(area_root // 24)
+        # buffer = int(area_root // 24)
         b_buffer = int(area_root // 12)
+        buffer = 0
 
         x_scale, y_scale = 1, 1
         if rescale_ratios is not None:
