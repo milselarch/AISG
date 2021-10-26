@@ -253,6 +253,11 @@ class FaceExtractor(object):
                 np_frames, interval=every_n_frames
             )
 
+        if every_n_frames > 10:
+            min_frames = 5
+        else:
+            min_frames = 7
+
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
             every_n_frames=every_n_frames, current_rescale=1,
@@ -265,19 +270,21 @@ class FaceExtractor(object):
         )
 
         if len(sorted_face_frames) > 1:
-            excluded_faces = cls.exclude_faces(sorted_face_frames)
+            excluded_faces = cls.exclude_faces(
+                sorted_face_frames, min_frames=min_frames
+            )
         else:
             excluded_faces = []
 
         face_image_map, shifted_face_no = {}, 0
 
-        for face_no in range(num_faces):
+        for face_no in sorted_face_frames:
             if face_no in excluded_faces:
                 continue
 
             face_images = {}
+            face_rows = sorted_face_frames[face_no]
             face_image_map[shifted_face_no] = face_images
-            face_rows = sorted_face_frames[shifted_face_no]
 
             for i, row in enumerate(face_rows):
                 frame = np_frames[i]

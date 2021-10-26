@@ -12,7 +12,9 @@ dataset = datasets.Dataset(basedir='datasets')
 # filenames.append('0ae1576c58393c78.mp4')  # two faces here
 # filenames.append('bb34433231a222e5.mp4')  # black background
 # filenames.append('0c0c3a74ba96c692.mp4')
-filenames = ['f0d0282ba659ba75.mp4']
+# f0d0282ba659ba75
+# f45a1fd86d66e669
+filenames = ['f45a1fd86d66e669.mp4']
 
 def callback(filepath, face_image_map, pbar):
     name = filepath

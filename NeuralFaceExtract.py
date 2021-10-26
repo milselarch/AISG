@@ -29,6 +29,7 @@ class NeuralFaceExtract(object):
             post_process=True, device=self.device
         )
         self.df = None
+
         self.filename_log = None
         self.num_face_log = None
         self.frame_log = None
