@@ -1603,3 +1603,15 @@ class FaceCluster(object):
         out_path = f'stats/labelled-detections-{self.stamp}.csv'
         detections.to_csv(out_path, index=False)
         print(f'labelled detections saved to {out_path}')
+
+    @staticmethod
+    def get_orig_labels():
+        label_df = pd.read_csv('datasets/train.csv')
+        filenames = label_df['filename'].to_numpy()
+        labels = label_df['label'].to_numpy()
+        labels_map = {}
+
+        for filename, label in zip(filenames, labels):
+            labels_map[filename] = label
+
+        return labels_map

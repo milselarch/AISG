@@ -154,32 +154,37 @@ class VideoArray(object):
             for x_start in range(width):
                 v_stripe = gray_frame[:, x_start]
                 v_stripe = v_stripe.flatten()
-                max_val = np.max(v_stripe)
-                if max_val > 0:
+
+                p_black = sum(v_stripe > 2) / len(v_stripe)
+                if p_black > 0.01:
                     break
 
             x_back_end = 0
             for x_back_end in range(width):
                 v_stripe = gray_frame[:, width-x_back_end-1]
                 v_stripe = v_stripe.flatten()
-                max_val = np.max(v_stripe)
-                if max_val > 0:
+
+                p_black = sum(v_stripe > 2) / len(v_stripe)
+                if p_black > 0.01:
                     break
 
             y_start = 0
             for y_start in range(height):
                 h_stripe = gray_frame[y_start, :]
                 h_stripe = h_stripe.flatten()
-                max_val = np.max(h_stripe)
-                if max_val > 0:
+
+                p_black = sum(h_stripe > 2) / len(h_stripe)
+                print(y_start, p_black, h_stripe)
+                if p_black > 0.01:
                     break
 
             y_back_end = 0
             for y_back_end in range(height):
                 h_stripe = gray_frame[height-y_back_end-1, :]
                 h_stripe = h_stripe.flatten()
-                max_val = np.max(h_stripe)
-                if max_val > 0:
+
+                p_black = sum(h_stripe > 2) / len(h_stripe)
+                if p_black > 0.01:
                     break
 
             x_starts.append(x_start)

@@ -8,12 +8,13 @@ from NeuralFaceExtract import NeuralFaceExtract
 from PIL import Image
 
 dataset = datasets.Dataset(basedir='datasets')
-filenames = dataset.all_videos[:5].tolist()
-filenames.append('0ae1576c58393c78.mp4')  # two faces here
-filenames.append('bb34433231a222e5.mp4')  # black background
-filenames.append('0c0c3a74ba96c692.mp4')
+# filenames = dataset.all_videos[:].tolist()
+# filenames.append('0ae1576c58393c78.mp4')  # two faces here
+# filenames.append('bb34433231a222e5.mp4')  # black background
+# filenames.append('0c0c3a74ba96c692.mp4')
+filenames = ['f0d0282ba659ba75.mp4']
 
-def callback(filepath, face_image_map):
+def callback(filepath, face_image_map, pbar):
     name = filepath
     if '/' in filepath:
         name = name[name.rindex('/')+1:]
@@ -21,7 +22,7 @@ def callback(filepath, face_image_map):
     name = name[:name.index('.')]
     print(f'NAME {name}')
 
-    export_dir = 'datasets-local/mtcnn-faces'
+    export_dir = 'datasets-local/mtcnn-faces-test'
     face_dir = f'{export_dir}/{name}'
 
     if not os.path.exists(export_dir):

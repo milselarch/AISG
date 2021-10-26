@@ -1,3 +1,13 @@
+try:
+    import ParentImport
+
+    from FaceAnalysis import FaceCluster
+
+except ModuleNotFoundError:
+    from . import ParentImport
+
+    from ..FaceAnalysis import FaceCluster
+
 import audio
 import torch
 import os, random, cv2, argparse
@@ -18,11 +28,81 @@ syncnet_T = 5
 syncnet_mel_step_size = 16
 
 class Dataset(object):
-    def __init__(self):
-        self.real_samples = {}
-        self.fake_samples = {}
+    def __init__(self, seed=32, train_size=0.95, load=True):
+        self.face_files = None
+        self.train_face_files = None
+        self.test_face_files = None
 
+        self.train_size = train_size
+        self.seed = seed
 
+        if load:
+            self.load_datasets()
+
+    def load_datasets(self):
+        face_cluster = FaceCluster(load_datasets=False)
+        face_path = '../stats/bg-clusters/face-vid-labels.csv'
+        face_map = face_cluster.make_face_map(face_path)
+        labels_map = face_cluster.get_orig_labels()
+        detect_path = '../stats/sorted-detections.csv'
+        detections = pd.read_csv(detect_path)
+
+        self.face_files = {}
+        self.train_face_files = {}
+        self.test_face_files = {}
+
+        file_column = detections['filename'].to_numpy()
+        face_column = detections['face'].to_numpy()
+        frame_column = detections['frame'].to_numpy()
+        talker_column = detections['talker'].to_numpy()
+        num_faces_column = detections['num_faces'].to_numpy()
+        file_map = {}
+
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            is_fake = labels_map[filename]
+            is_talker = talker_column[k]
+            num_faces = num_faces_column[k]
+
+            if is_fake:
+                continue
+            elif not is_talker and (num_faces > 1):
+                continue
+
+            if filename not in file_map:
+                file_map[filename] = []
+
+            frames = file_map[filename]
+            frames.append({
+                'face': face_column[k],
+                'frame': frame_column[k],
+                'talker': is_talker,
+                'num_faces': num_faces
+            })
+
+        for filename in tqdm(face_map):
+            if filename not in file_map:
+                continue
+
+            # face_fake = face_map[filename]
+            frames = file_map[filename]
+            self.face_files[filename] = []
+
+            for k in range(len(frames)):
+                frame_no = frames[k]['frame']
+                # is_talker = frames[k]['talker']
+                face_no = frames[k]['face']
+
+                name = filename[:filename.index('.')]
+                img_file = f'{name}/{face_no}-{frame_no}.jpg'
+                img_path = f'../datasets-local/faces/{img_file}'
+                self.face_files[filename].append(img_path)
+
+        all_filenames = list(self.face_files.keys())
+        x_train, x_test, y_train, y_test = train_test_split(
+            all_filenames, all_filenames,
+            random_state=self.seed, train_size=self.train_size
+        )
 
     @staticmethod
     def get_frame_id(frame):

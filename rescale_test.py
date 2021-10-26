@@ -7,8 +7,9 @@ from loader import load_video
 # 0c0c3a74ba96c692.mp4
 # bb34433231a222e5.mp4
 # 0e5769008d488797.mp4
+# e4ed78bc2aa92b40.mp4
 
-filename = '0e5769008d488797.mp4'
+filename = 'bb34433231a222e5.mp4'
 filepath = f'datasets/train/videos/{filename}'
 
 video_cap = cv2.VideoCapture(filepath)

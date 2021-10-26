@@ -92,13 +92,15 @@ class Area(object):
 class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
-        frame_no: int
+        frame_no: int, num_faces: int
     ):
         assert len(coords) == 4
         self.image = image
+
         self.coords = coords
         self.face_no = face_no
         self.frame_no = frame_no
+        self.num_faces = num_faces
 
     def rescale_coords(self, rescale):
         assert rescale > 0
@@ -293,7 +295,8 @@ class FaceExtractor(object):
                 frame_no = row['frames']
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
-                    face_no=shifted_face_no, frame_no=frame_no
+                    face_no=shifted_face_no, frame_no=frame_no,
+                    num_faces=num_faces
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)
@@ -529,7 +532,9 @@ class FaceExtractor(object):
 
         area = (bottom - top) * (right - left)
         area_root = area ** 0.5
-        buffer = int(area_root // 7)
+        # buffer = int(area_root // 7)
+        b_buffer = int(area_root // 12)
+        buffer = 0
 
         x_scale, y_scale = 1, 1
         if rescale_ratios is not None:
@@ -538,7 +543,9 @@ class FaceExtractor(object):
         b_top = max(top - buffer / y_scale, 0)
         b_left = max(left - buffer / x_scale, 0)
         b_right = min(right + buffer / x_scale, img_width)
-        b_bottom = min(bottom + buffer / y_scale, img_height)
+        b_bottom = min(
+            bottom + (b_buffer + buffer) / y_scale, img_height
+        )
 
         # get square coordinates
         s_top, s_left, s_right, s_bottom = cls.square_coords(
@@ -610,7 +617,6 @@ class FaceExtractor(object):
 
             #  print(f'FRAME NO {i} {np_frames.shape}')
             face_rows = face_frames[face_no]
-
             # print('rows', face_rows)
 
             for i, row in enumerate(face_rows):
