@@ -174,7 +174,7 @@ class VideoArray(object):
                 h_stripe = h_stripe.flatten()
 
                 p_black = sum(h_stripe > 2) / len(h_stripe)
-                print(y_start, p_black, h_stripe)
+                # print(y_start, p_black, h_stripe)
                 if p_black > 0.01:
                     break
 

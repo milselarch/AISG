@@ -120,6 +120,10 @@ class NeuralFaceExtract(object):
                 filepath, every_n_frames=20, scale=scale
             )
 
+            if vid_obj is None:
+                callback(filepath, None, pbar)
+                continue
+
             vid_obj = vid_obj.auto_resize()
             print(f'{filepath} SCALE {scale}')
             np_frames = vid_obj.out_video
@@ -133,6 +137,9 @@ class NeuralFaceExtract(object):
             callback(filepath, face_image_map, pbar)
 
     def callback(self, filepath, face_image_map, pbar=None):
+        if face_image_map is None:
+            return False
+
         name = filepath
         if '/' in filepath:
             name = name[name.rindex('/') + 1:]
