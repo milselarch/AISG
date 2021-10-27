@@ -12,6 +12,12 @@ except ModuleNotFoundError:
     from .network.classifier import *
     from .network.transform import mesonet_data_transforms
 
+try:
+    # need it for tensorboard
+    import tensorflow as tf
+except ImportError:
+    print('WARNING: NO TENSORFLOW FOUND')
+
 import numpy as np
 
 import torch

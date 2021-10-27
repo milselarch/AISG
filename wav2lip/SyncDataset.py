@@ -28,13 +28,25 @@ syncnet_T = 5
 syncnet_mel_step_size = 16
 
 class Dataset(object):
-    def __init__(self, seed=32, train_size=0.95, load=True):
+    def __init__(
+        self, seed=32, train_size=0.95, load=True,
+        mel_step_size=16
+    ):
+        self.mel_step_size = mel_step_size
+
+        self.face_base_dir = '../datasets-local/faces'
+        self.video_base_dir = '../datasets/train/videos'
+
         self.face_files = None
         self.train_face_files = None
         self.test_face_files = None
 
         self.train_size = train_size
         self.seed = seed
+
+        self.real_sample_cache = {}
+        self.fake_sample_cache = {}
+        self.fps_cache = {}
 
         if load:
             self.load_datasets()
@@ -95,7 +107,7 @@ class Dataset(object):
 
                 name = filename[:filename.index('.')]
                 img_file = f'{name}/{face_no}-{frame_no}.jpg'
-                img_path = f'../datasets-local/faces/{img_file}'
+                img_path = f'{self.face_base_dir}/{img_file}'
                 self.face_files[filename].append(img_path)
 
         all_filenames = list(self.face_files.keys())
@@ -104,9 +116,42 @@ class Dataset(object):
             random_state=self.seed, train_size=self.train_size
         )
 
+        self.train_face_files = {}
+        self.test_face_files = {}
+
+        for filename in all_filenames:
+            video_face_files = self.face_files[filename]
+            if filename in x_train:
+                self.train_face_files[filename] = video_face_files
+            else:
+                self.test_face_files[filename] = video_face_files
+
+    def load_real_samples(
+        self, filename, is_training=True
+    ):
+        if is_training:
+            image_paths = self.train_face_files[filename]
+        else:
+            image_paths = self.test_face_files[filename]
+
+        if filename not in self.fps_cache:
+            filepath = f'{self.video_base_dir}/{filename}'
+            cap = cv2.VideoCapture(filepath)
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            self.fps_cache[filename] = fps
+
+        fps = self.fps_cache[filename]
+        for image_path in image_paths:
+            image = cv2.imread(image_path)
+
+
+
     @staticmethod
-    def get_frame_id(frame):
-        return int(basename(frame).split('.')[0])
+    def get_frame_no(filename):
+        base_filename = basename(filename)
+        name = base_filename[:base_filename.index('.')]
+        face_no, frame_no = [int(x) for x in name.split('-')]
+        return face_no, frame_no
 
     def get_window(self, start_frame):
         start_id = self.get_frame_id(start_frame)
@@ -165,7 +210,9 @@ class Dataset(object):
                     all_read = False
                     break
                 try:
-                    img = cv2.resize(img, (hparams.img_size, hparams.img_size))
+                    img = cv2.resize(
+                        img, (hparams.img_size, hparams.img_size)
+                    )
                 except Exception as e:
                     all_read = False
                     break

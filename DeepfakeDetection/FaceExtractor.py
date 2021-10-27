@@ -254,9 +254,9 @@ class FaceExtractor(object):
             )
 
         if every_n_frames > 10:
-            min_frames = 5
+            min_frames = 7
         else:
-            min_frames = 11
+            min_frames = 13
 
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
@@ -277,6 +277,7 @@ class FaceExtractor(object):
             excluded_faces = []
 
         face_image_map, shifted_face_no = {}, 0
+        num_export_faces = num_faces - len(excluded_faces)
 
         for face_no in sorted_face_frames:
             if face_no in excluded_faces:
@@ -303,7 +304,7 @@ class FaceExtractor(object):
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
                     face_no=shifted_face_no, frame_no=frame_no,
-                    num_faces=num_faces
+                    num_faces=num_export_faces
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)
@@ -315,6 +316,9 @@ class FaceExtractor(object):
 
     @staticmethod
     def sort_face_frames(face_frames, num_faces):
+        # faces are sorted left to right
+        # using the LEFT corner of their bounding box
+
         left_positions = []
         for face_no in tuple(face_frames.keys()):
             left_positions.append(
@@ -668,23 +672,49 @@ class FaceExtractor(object):
     def exclude_faces(sorted_face_frames, min_frames=5):
         num_faces = len(sorted_face_frames)
         face_nos = tuple(sorted_face_frames.keys())
+        max_frames, max_face_area = 0, 0
         excluded_faces = []
+        face_area_map = {}
+
+        for face_no in face_nos:
+            face_frame_rows = sorted_face_frames[face_no]
+            face_areas = []
+
+            for frame_row in face_frame_rows:
+                top = int(frame_row["top"])
+                left = int(frame_row["left"])
+                right = int(frame_row["right"])
+                bottom = int(frame_row["bottom"])
+
+                area = (bottom - top) * (right - left)
+                face_areas.append(area)
+
+            face_area = np.median(face_areas)
+            face_area_map[face_no] = face_area
+            max_face_area = max(face_area, max_face_area)
+
+            num_frames = len(face_frame_rows)
+            max_frames = max(num_frames, max_frames)
 
         for face_no in face_nos:
             if len(sorted_face_frames) == 1:
                 break
 
             frames = sorted_face_frames[face_no]
-            if len(frames) < min_frames:
+            face_area = face_area_map[face_no]
+
+            if len(frames) < max_frames * 0.51:
+                excluded_faces.append(face_no)
+            elif face_area < max_face_area * 0.5:
                 excluded_faces.append(face_no)
 
         if len(excluded_faces) == num_faces:
-            best_index, max_frames = 0, float('-inf')
+            best_index = 0
 
             for k, face_no in enumerate(face_nos):
                 frames = sorted_face_frames[face_no]
-                if len(frames) > max_frames:
-                    max_frames = len(frames)
+                if len(frames) >= max_frames:
+                    assert max_frames == len(frames)
                     best_index = k
 
             del excluded_faces[best_index]
@@ -768,5 +798,3 @@ class FaceExtractor(object):
 
         if export_df:
             face_records.export()
-
-

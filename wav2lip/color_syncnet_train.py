@@ -116,8 +116,7 @@ class Dataset(object):
                 continue
 
             mel = self.crop_audio_window(orig_mel.copy(), img_name)
-
-            if (mel.shape[0] != syncnet_mel_step_size):
+            if mel.shape[0] != syncnet_mel_step_size:
                 continue
 
             # H x W x 3 * T

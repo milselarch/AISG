@@ -12,9 +12,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import imagehash
+import shutil
 import cv2
 import os
 
+from shutil import copyfile
 from datetime import datetime
 from tqdm.auto import tqdm
 from PIL import Image, ImageDraw
@@ -1272,14 +1274,15 @@ class FaceCluster(object):
     @staticmethod
     def make_face_map(face_path=None):
         if face_path is None:
-            face_path = 'stats/bg-clusters/face-vid-labels.csv'
+            # face_path = 'stats/bg-clusters/face-vid-labels.csv'
+            face_path = 'stats/all-labels.csv'
 
         face_df = pd.read_csv(face_path)
         face_map = {}
 
         for index in face_df.index:
             row = face_df.loc[index]
-            fake_face, filename = row['label'], row['filename']
+            fake_face, filename = row['face_fake'], row['filename']
             face_map[filename] = fake_face
 
         return face_map
@@ -1413,9 +1416,13 @@ class FaceCluster(object):
 
         for k in range(len(frame_rows)):
             frame = frame_rows.iloc[k]
-            face_no = frame['face']
-            assert face_no in (0, 1)
 
+            try:
+                face_no = frame['face']
+            except KeyError:
+                face_no = frame['face_no']
+
+            assert face_no in (0, 1)
             color = 'red' if face_no == 0 else '#AAFF00'
             top, bottom = frame['top'], frame['bottom']
             left, right = frame['left'], frame['right']
@@ -1425,7 +1432,8 @@ class FaceCluster(object):
         return np.array(pil_img)
 
     def manual_label_two_face(self):
-        path = 'stats/sorted-detections.csv'
+        # path = 'stats/sorted-detections.csv'
+        path = 'stats/labelled-mtcnn.csv'
         result = self.count_video_faces(path=path)
         detections, face_count_map = result
         face_map = self.make_face_map()
@@ -1491,7 +1499,10 @@ class FaceCluster(object):
                 file_path, specific_frames=[frame_no]
             )
 
+            out = out.auto_resize()
             frame_img = out.out_video[0]
+            print(f'FRAME ROWS')
+            print(frame_rows)
             image = self.draw_rects(frame_img, frame_rows)
             plt.title(message)
             plt.imshow(image)
@@ -1513,6 +1524,7 @@ class FaceCluster(object):
                     break
 
                 if command == 'r':
+                    # face 0 is left most
                     detections.loc[cond & cond_face_0, 'talker'] = 1
                     detections.loc[cond & cond_face_1, 'talker'] = 0
                     break
@@ -1615,3 +1627,356 @@ class FaceCluster(object):
             labels_map[filename] = label
 
         return labels_map
+    
+    def double_frames(self):
+        base_dir = 'datasets-local/mtcnn-faces-h'
+        export_dir = 'datasets-local/mtcnn-faces'
+        dirs = os.listdir(base_dir)
+
+        """
+        for video_name in tqdm(dirs):
+            face_dir = f'{base_dir}/{video_name}'
+            map_dir = f'{export_dir}/{video_name}'
+            files = os.listdir(face_dir)
+
+            if not os.path.exists(map_dir):
+                os.mkdir(map_dir)
+
+            for filename in files:
+                filepath = f'{face_dir}/{filename}'
+                name = filename[:filename.index('.')]
+                face_no, frame_no = [int(x) for x in name.split('-')]
+                export_name = f'{face_no}-{2 * frame_no}.jpg'
+                export_path = f'{map_dir}/{export_name}'
+                copyfile(filepath, export_path)
+        """
+
+        mtcnn_detect_path = 'stats/mtcnn-detect-211027-1421.csv'
+        df = pd.read_csv(mtcnn_detect_path)
+
+        if 10 in df['frame']:
+            df['frame'] *= 2
+            df.to_csv(mtcnn_detect_path, index=False)
+
+    def fix_mtcnn_face_count(self):
+        mtcnn_detect_path = 'stats/mtcnn-detect-211027-1421.csv'
+        mtcnn_df = pd.read_csv(mtcnn_detect_path)
+
+        file_column = mtcnn_df['filename'].to_numpy()
+        face_column = mtcnn_df['face_no'].to_numpy()
+        frame_column = mtcnn_df['frame'].to_numpy()
+        # talker_column = mtcnn_df['talker'].to_numpy()
+        num_faces_column = mtcnn_df['num_faces'].to_numpy()
+        file_map, face_map = {}, {}
+
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            frame_no = frame_column[k]
+            face_no = face_column[k]
+            pair = (frame_no, face_no)
+
+            if filename not in file_map:
+                file_map[filename] = {}
+                face_map[filename] = []
+
+            faces = face_map[filename]
+            if face_no not in faces:
+                faces.append(face_no)
+
+            frames = file_map[filename]
+            frames[pair] = {
+                'face': face_column[k],
+                'frame': frame_column[k],
+                # 'talker': talker_column[k],
+                'num_faces': num_faces_column[k]
+            }
+
+        new_num_faces_column = []
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            faces = face_map[filename]
+            num_faces = len(faces)
+            assert num_faces >= 1
+
+            new_num_faces_column.append(num_faces)
+
+        mtcnn_df['num_faces'] = new_num_faces_column
+        export_df = 'stats/mtcnn-detect-fix.csv'
+        mtcnn_df.to_csv(export_df, index=False)
+        print(f'exported to {export_df}')
+
+    def mtcnn_find_mismatches(self):
+        # mtcnn_detect_path = 'stats/mtcnn-detect-fix.csv'
+        mtcnn_detect_path = 'stats/combine-mtcnn-211027-2141.csv'
+        detect_path = 'stats/sorted-detections.csv'
+        mtcnn_df = pd.read_csv(mtcnn_detect_path)
+        detections = pd.read_csv(detect_path)
+
+        file_column = detections['filename'].to_numpy()
+        face_column = detections['face'].to_numpy()
+        frame_column = detections['frame'].to_numpy()
+        talker_column = detections['talker'].to_numpy()
+        num_faces_column = detections['num_faces'].to_numpy()
+
+        bad_filename_log = []
+        dlib_face_log, num_face_log = [], []
+        file_map = {}
+
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            frame_no = frame_column[k]
+            face_no = face_column[k]
+            pair = (frame_no, face_no)
+
+            if filename not in file_map:
+                file_map[filename] = {}
+
+            frames = file_map[filename]
+            frames[pair] = {
+                'face': face_column[k],
+                'frame': frame_column[k],
+                'talker': talker_column[k],
+                'num_faces': num_faces_column[k]
+            }
+
+        filenames = []
+        mismatches = 0
+        total = len(mtcnn_df.index)
+
+        for index in tqdm(mtcnn_df.index):
+            row = mtcnn_df.loc[index]
+            filename = row['filename']
+
+            if filename not in filenames:
+                filenames.append(filename)
+            else:
+                continue
+
+            frame_no = row['frame']
+            face_no = row['face_no']
+            num_faces = row['num_faces']
+            pair = (frame_no, face_no)
+
+            try:
+                frame_map = file_map[filename]
+            except KeyError:
+                mismatches += 1
+                bad_filename_log.append(filename)
+                dlib_face_log.append(0)
+                num_face_log.append(num_faces)
+
+                header = f'{filename} [{mismatches}][{index}/{total}]'
+                print(f'NEW File {header} {num_faces}')
+                continue
+
+            keys = list(frame_map.keys())
+            file_frame = frame_map[keys[0]]
+            file_faces = file_frame['num_faces']
+
+            if file_faces != num_faces:
+                mismatches += 1
+                bad_filename_log.append(filename)
+                dlib_face_log.append(file_faces)
+                num_face_log.append(num_faces)
+
+                header = f'{filename} [{mismatches}][{index}/{total}]'
+                print(f'{header}: {file_faces}, {num_faces}')
+
+        df = pd.DataFrame(data={
+            'filename': bad_filename_log,
+            'dlib_num_faces': dlib_face_log,
+            'num_faces': num_face_log
+        })
+
+        date_stamp = self.make_date_stamp()
+        export_path = f'stats/mismatches-{date_stamp}.csv'
+        df.to_csv(export_path, index=False)
+        print(f'mismatches exported to {export_path}')
+
+    def get_face_ratios(self):
+        mismatch_path = 'stats/mismatches-211027-1914.csv'
+        mismatch_df = pd.read_csv(mismatch_path)
+        mismatch_filenames = mismatch_df['filename'].to_numpy()
+
+        mtcnn_detect_path = 'stats/mtcnn-detect-fix.csv'
+        detect_path = 'stats/sorted-detections.csv'
+        mtcnn_df = pd.read_csv(mtcnn_detect_path)
+        detections = pd.read_csv(detect_path)
+
+        file_column = mtcnn_df['filename'].to_numpy()
+        face_column = mtcnn_df['face_no'].to_numpy()
+        frame_column = mtcnn_df['frame'].to_numpy()
+        # talker_column = mtcnn_df['talker'].to_numpy()
+        num_faces_column = mtcnn_df['num_faces'].to_numpy()
+
+        file_map = {}
+
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            frame_no = frame_column[k]
+            face_no = face_column[k]
+            pair = (frame_no, face_no)
+
+            if filename not in file_map:
+                file_map[filename] = {}
+
+            face_counts = file_map[filename]
+            if face_no not in face_counts:
+                face_counts[face_no] = 0
+
+            face_counts[face_no] += 1
+
+        for filename in mismatch_filenames:
+            face_counts = file_map[filename]
+            if len(face_counts) < 2:
+                continue
+
+            frame_counts = sorted(face_counts.values())
+            ratio = frame_counts[-2] / frame_counts[-1]
+            mismatch = filename in mismatch_filenames
+            print(
+                'M', filename, ratio, mismatch,
+                len(face_counts)
+            )
+
+        print('')
+        print('analysing all files')
+        bad_ratio_files = 0
+
+        for filename in file_map:
+            face_counts = file_map[filename]
+            if len(face_counts) < 2:
+                continue
+
+            frame_counts = sorted(face_counts.values())
+            ratio = frame_counts[-2] / frame_counts[-1]
+            mismatch = filename in mismatch_filenames
+
+            if ratio < 0.52:
+                bad_ratio_files += 1
+                print(
+                    bad_ratio_files, filename, ratio, mismatch,
+                    len(face_counts)
+                )
+
+    def purge_mismatches(self):
+        mismatch_path = 'stats/mismatches-211027-1914.csv'
+        mismatch_df = pd.read_csv(mismatch_path)
+        mismatch_filenames = mismatch_df['filename'].to_numpy()
+
+        for filename in tqdm(mismatch_filenames):
+            name = filename[:filename.index('.')]
+            video_dir = f'datasets-local/mtcnn-faces/{name}'
+            shutil.rmtree(video_dir)
+
+    def stitch_mtcnn_detections(self):
+        mtcnn_detect_path = 'stats/mtcnn-detect-fix.csv'
+        mtcnn_df = pd.read_csv(mtcnn_detect_path)
+        stitch_detect_path = 'stats/mtcnn-detect-211027-2123.csv'
+        stitch_df = pd.read_csv(stitch_detect_path)
+
+        stitch_filenames = stitch_df['filename'].to_numpy()
+        stitch_filenames = np.unique(stitch_filenames)
+        mtcnn_df = mtcnn_df[
+            mtcnn_df['filename'].apply(
+                lambda x: x not in stitch_filenames
+            )
+        ]
+
+        combined = mtcnn_df.append(stitch_df, ignore_index=True)
+
+        date_stamp = self.make_date_stamp()
+        export_path = f'stats/stitch-mtcnn-{date_stamp}.csv'
+        combined.to_csv(export_path, index=False)
+        print(f'exported to {export_path}')
+
+    def discern_mismatches(self):
+        mismatch_path = 'stats/mismatches-211027-2147.csv'
+        mismatch_df = pd.read_csv(mismatch_path)
+        mismatch_filenames = mismatch_df['filename'].to_numpy()
+        mismatches = 0
+
+        for index in mismatch_df.index:
+            row = mismatch_df.loc[index]
+            filename = row['filename']
+            dlib_num_faces = row['dlib_num_faces']
+            num_faces = row['num_faces']
+
+            if dlib_num_faces == 0:
+                assert num_faces == 1
+                continue
+            if num_faces < dlib_num_faces:
+                continue
+
+            print(mismatches, filename, dlib_num_faces, num_faces)
+            mismatches += 1
+
+    def flip_detections(self):
+        path = 'stats/sorted-detections.csv'
+        detections = pd.read_csv(path)
+
+        row = detections['talker'].to_numpy()
+        row_filter = (row == -1).astype(int)
+        row = (1 - row) * (1 - row_filter) + row_filter * row
+
+        detections['talker'] = row
+        # detections[detections['talker'] == 2] = -1
+        date_stamp = self.make_date_stamp()
+        export_path = f'stats/flip-detections-{date_stamp}.csv'
+        detections.to_csv(export_path, index=False)
+        print(f'exported to {export_path}')
+
+    def copy_talkers(self):
+        mismatch_path = 'stats/mismatches-211027-2147.csv'
+        mismatch_df = pd.read_csv(mismatch_path)
+        mismatch_filenames = mismatch_df['filename'].to_numpy()
+        mtcnn_path = 'stats/stitch-mtcnn-211027-2335.csv'
+        mtcnn_df = pd.read_csv(mtcnn_path)
+        detect_path = 'stats/flip-detections-211027-2243.csv'
+        detections = pd.read_csv(detect_path)
+        talker_map = {}
+
+        for index in tqdm(detections.index):
+            row = detections.loc[index]
+            filename = row['filename']
+            face_no = row['face']
+            talker = row['talker']
+
+            pair = (filename, face_no)
+            if pair in talker_map:
+                continue
+
+            talker_map[pair] = talker
+
+        talker_row = []
+        for index in tqdm(mtcnn_df.index):
+            row = mtcnn_df.loc[index]
+            filename = row['filename']
+            face_no = row['face_no']
+            pair = (filename, face_no)
+
+            if filename in mismatch_filenames:
+                talker_row.append(-1)
+                continue
+
+            talker = talker_map[pair]
+            talker_row.append(talker)
+
+        mtcnn_df['talker'] = talker_row
+        date_stamp = self.make_date_stamp()
+        export_path = f'stats/copy-mtcnn-{date_stamp}.csv'
+        mtcnn_df.to_csv(export_path, index=False)
+        print(f'exported to {export_path}')
+
+    def realign_coord_mtcnn(self):
+        path = 'stats/labelled-mtcnn-211028-0018.csv'
+        df = pd.read_csv(path)
+
+        df[['left', 'right', 'bottom']] = df[[
+            'right', 'bottom', 'left'
+        ]]
+
+        date_stamp = self.make_date_stamp()
+        export_path = f'stats/realign-mtcnn-{date_stamp}.csv'
+        df.to_csv(export_path, index=False)
+        print(f'exported to {export_path}')
