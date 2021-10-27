@@ -30,7 +30,7 @@ print(len(dataset.test_videos), dataset.test_videos[:5])
 max_face_mapping = {}
 length = len(dataset.all_videos)
 
-scale_down = 4
+scale_down = 2
 every_n_frames = 20
 n = every_n_frames
 
@@ -161,9 +161,6 @@ def run():
         print(f'READ {k}/{length}', filename, max_faces, p_detection)
 
     face_coords_df.to_csv(csv_filename, index=False)
-
-    with open(json_filename, 'w') as fp:
-        json.dump(max_face_mapping, fp, indent=4)
 
 
 if __name__ == '__main__':

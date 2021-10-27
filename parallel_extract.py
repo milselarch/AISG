@@ -8,10 +8,10 @@ from ParallelFaceExtract import ParallelFaceExtract
 from PIL import Image
 
 dataset = datasets.Dataset(basedir='datasets')
-filenames = dataset.all_videos[:5].tolist()
-filenames.append('0ae1576c58393c78.mp4')  # two faces here
-filenames.append('bb34433231a222e5.mp4')  # black background
-filenames.append('0c0c3a74ba96c692.mp4')
+filenames = dataset.all_videos[:].tolist()
+# filenames.append('0ae1576c58393c78.mp4')  # two faces here
+# filenames.append('bb34433231a222e5.mp4')  # black background
+# filenames.append('0c0c3a74ba96c692.mp4')
 
 filepaths = []
 for k in range(len(filenames)):
@@ -22,7 +22,7 @@ for k in range(len(filenames)):
 start_time = time.perf_counter()
 # input(f'IN FILEPATHS {filepaths}')
 extractor = ParallelFaceExtract(filepaths=filepaths)
-extractor.start(filepaths)
+extractor.start(filepaths, num_processes=4)
 
 for k in tqdm(range(len(filenames))):
     extractions = extractor.extractions

@@ -119,7 +119,8 @@ class NeuralFaceExtract(object):
                 scale = 1
 
             vid_obj = loader.load_video(
-                filepath, every_n_frames=20, scale=scale
+                filepath, every_n_frames=every_n_frames,
+                scale=scale
             )
 
             if vid_obj is None:
@@ -171,7 +172,8 @@ class NeuralFaceExtract(object):
                 num_faces = face.num_faces
                 coords = face.coords
 
-                top, right, bottom, left = coords
+                # top, right, bottom, left = coords
+                top, left, right, bottom = coords
 
                 self.filename_log.append(filename)
                 self.num_face_log.append(num_faces)
@@ -187,7 +189,7 @@ class NeuralFaceExtract(object):
                 path = f'{face_dir}/{face_no}-{frame_no}.jpg'
                 im.save(path)
 
-    def extract_all(self, every_n_frames=20):
+    def extract_all(self, filenames=None, every_n_frames=20):
         self.filename_log = []
         self.num_face_log = []
         self.frame_log = []
@@ -199,7 +201,9 @@ class NeuralFaceExtract(object):
         self.bottom_log = []
 
         dataset = datasets.Dataset(basedir='datasets')
-        filenames = dataset.all_videos[:].tolist()
+        if filenames is None:
+            filenames = dataset.all_videos[:].tolist()
+
         filepaths = []
 
         for k in range(len(filenames)):
@@ -220,7 +224,7 @@ class NeuralFaceExtract(object):
         df = pd.DataFrame(data={
             'filename': self.filename_log,
             'num_faces': self.num_face_log,
-            'face_no': self.face_log,
+            'face': self.face_log,
             'frame': self.frame_log,
 
             'top': self.top_log,

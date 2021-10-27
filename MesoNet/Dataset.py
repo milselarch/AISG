@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
 from datetime import datetime as Datetime
-from PIL import Image
+from PIL import Image, ImageOps
 
 class Dataset(object):
     def __init__(self, train_size=0.9, seed=42, load=True):
@@ -28,6 +28,11 @@ class Dataset(object):
             transforms.ToTensor(),
             transforms.Normalize([0.5] * 3, [0.5] * 3)
         ])
+
+        self.face_path = '../stats/all-labels.csv'
+        # self.detect_path = '../stats/sorted-detections.csv'
+        self.detect_path = '../stats/labelled-mtcnn.csv'
+        self.face_dir = '../datasets-local/mtcnn-faces'
 
         self.real_files = None
         self.fake_files = None
@@ -120,9 +125,9 @@ class Dataset(object):
             tag = self.make_date_stamp()
 
         face_cluster = FaceCluster(load_datasets=False)
-        face_path = '../stats/bg-clusters/face-vid-labels.csv'
+        face_path = self.face_path
         face_map = face_cluster.make_face_map(face_path)
-        detect_path = '../stats/sorted-detections.csv'
+        detect_path = self.detect_path
         detections = pd.read_csv(detect_path)
 
         for index in tqdm(detections.index):
@@ -133,7 +138,7 @@ class Dataset(object):
 
             name = filename[:filename.index('.')]
             img_file = f'{name}/{face_no}-{frame_no}.jpg'
-            img_path = f'../datasets-local/faces/{img_file}'
+            img_path = f'{self.face_dir}/{img_file}'
             prediction = predict(img_path)
             detections.loc[index, 'prediction'] = prediction
 
@@ -143,9 +148,9 @@ class Dataset(object):
 
     def load_datasets(self):
         face_cluster = FaceCluster(load_datasets=False)
-        face_path = '../stats/bg-clusters/face-vid-labels.csv'
+        face_path = self.face_path
         face_map = face_cluster.make_face_map(face_path)
-        detect_path = '../stats/sorted-detections.csv'
+        detect_path = self.detect_path
         detections = pd.read_csv(detect_path)
 
         self.real_files = {}
@@ -197,7 +202,7 @@ class Dataset(object):
 
                 name = filename[:filename.index('.')]
                 img_file = f'{name}/{face_no}-{frame_no}.jpg'
-                img_path = f'../datasets-local/faces/{img_file}'
+                img_path = f'{self.face_dir}/{img_file}'
 
                 if face_fake == 0:
                     label = 0
@@ -298,9 +303,12 @@ class Dataset(object):
         return np_images, np_labels
 
     @staticmethod
-    def pil_loader(path: str) -> Image.Image:
+    def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
         with open(path, 'rb') as f:
             img = Image.open(f)
+            if random.random() < mirror_prob:
+                img = ImageOps.mirror(img)
+
             return img.convert('RGB')
 
     def load_filenames(self, label, samples=1, is_training=True):
