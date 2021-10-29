@@ -203,6 +203,7 @@ class Dataset(object):
                 name = filename[:filename.index('.')]
                 img_file = f'{name}/{face_no}-{frame_no}.jpg'
                 img_path = f'{self.face_dir}/{img_file}'
+                assert unique_face_nos < 3
 
                 if face_fake == 0:
                     label = 0
