@@ -1,10 +1,11 @@
 try:
+    import datasets
     from DeepfakeDetection.FaceExtractor import FaceExtractor
 except ModuleNotFoundError:
+    from . import datasets
     from .DeepfakeDetection.FaceExtractor import FaceExtractor
 
 import loader
-import datasets
 import torch
 import numpy as np
 import pandas as pd
