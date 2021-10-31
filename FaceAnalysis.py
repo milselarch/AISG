@@ -1275,9 +1275,12 @@ class FaceCluster(object):
     def make_face_map(face_path=None):
         if face_path is None:
             # face_path = 'stats/bg-clusters/face-vid-labels.csv'
-            face_path = 'stats/all-labels.csv'
+            face_path = '../stats/all-labels.csv'
 
+        face_path = os.path.abspath(face_path)
+        # print(face_path)
         face_df = pd.read_csv(face_path)
+        # print(face_df)
         face_map = {}
 
         for index in face_df.index:
@@ -1617,8 +1620,11 @@ class FaceCluster(object):
         print(f'labelled detections saved to {out_path}')
 
     @staticmethod
-    def get_orig_labels():
-        label_df = pd.read_csv('datasets/train.csv')
+    def get_orig_labels(path=None):
+        if path is None:
+            path = 'datasets/train.csv'
+
+        label_df = pd.read_csv(path)
         filenames = label_df['filename'].to_numpy()
         labels = label_df['label'].to_numpy()
         labels_map = {}

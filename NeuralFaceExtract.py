@@ -21,6 +21,8 @@ from tqdm.auto import tqdm
 
 class NeuralFaceExtract(object):
     def __init__(self):
+        self.export_dir = 'datasets-local/mtcnn-faces'
+
         self.device = torch.device(
             'cuda:0' if torch.cuda.is_available() else 'cpu'
         )
@@ -45,17 +47,65 @@ class NeuralFaceExtract(object):
     def make_date_stamp():
         return datetime.now().strftime("%y%m%d-%H%M")
 
-    def fill_face_maps(self, np_frames, interval, batch_size):
+    def extract_locations(
+        self, np_frames, batch_size, interval,
+        skip_detect=None
+    ):
+        sub_frames = []
+        sub_frame_nos = []
+        last_frame_no = 0
+
+        for k in range(len(np_frames)):
+            frame_no = interval * k
+            frame = np_frames[k]
+
+            if skip_detect is not None:
+                sub_frames.append(frame)
+                sub_frame_nos.append(frame_no)
+            elif frame_no - last_frame_no >= skip_detect:
+                sub_frames.append(frame)
+                sub_frame_nos.append(frame_no)
+                last_frame_no = frame_no
+
         frame_face_boxes, index = [], 0
         face_confs = []
 
-        while index < len(np_frames):
+        while index < len(sub_frames):
             end_index = index + batch_size
-            batch = np_frames[index:end_index]
+            batch = sub_frames[index:end_index]
             bboxes, bconfs = self.mtcnn.detect(batch)
+
             face_confs.extend(bconfs)
             frame_face_boxes.extend(bboxes)
             index = end_index
+
+        iterator = zip(sub_frame_nos, frame_face_boxes, face_confs)
+        detect_map = {}
+
+        for frame_no, bbox, bconf in iterator:
+            detect_map[frame_no] = (bbox, bconf)
+
+        prev_bbox, prev_bconf = None, None
+        total_face_frame_boxes = []
+        total_face_confs = []
+
+        for k in range(len(np_frames)):
+            frame_no = interval * k
+            if frame_no in detect_map:
+                prev_bbox, prev_bconf = detect_map[frame_no]
+
+            total_face_frame_boxes.append(prev_bbox)
+            total_face_confs.append(prev_bconf)
+
+        return total_face_frame_boxes, total_face_confs
+
+    def fill_face_maps(
+        self, np_frames, interval, batch_size, skip_detect=None
+    ):
+        frame_face_boxes, face_confs = self.extract_locations(
+            np_frames, batch_size=batch_size, interval=interval,
+            skip_detect=skip_detect
+        )
 
         # assert len(frame_face_boxes) == len(np_frames)
         max_faces, face_mapping = 0, {}
@@ -98,11 +148,13 @@ class NeuralFaceExtract(object):
 
     def process_filepaths(
         self, filepaths, callback=lambda *args: None,
-        every_n_frames=20, batch_size=16, base_dir=None
+        every_n_frames=20, batch_size=16, base_dir=None,
+        export_size=256, skip_detect=None
     ):
-        def fill_face_maps(frames, interval):
+        def fill_face_maps(frames, interval, skip_detect=None):
             return self.fill_face_maps(
-                frames, interval, batch_size=batch_size
+                frames, interval, batch_size=batch_size,
+                skip_detect=skip_detect
             )
 
         pbar = tqdm(filepaths)
@@ -135,7 +187,8 @@ class NeuralFaceExtract(object):
             face_image_map = FaceExtractor.faces_from_video(
                 np_frames, rescale=1, filename=filepath,
                 every_n_frames=every_n_frames, coords_scale=scale,
-                fill_face_maps=fill_face_maps
+                fill_face_maps=fill_face_maps,
+                export_size=export_size, skip_detect=skip_detect
             )
 
             callback(filepath, face_image_map, pbar)
@@ -153,11 +206,10 @@ class NeuralFaceExtract(object):
         filename = f'{name}.mp4'
         print(f'NAME {name}')
 
-        export_dir = 'datasets-local/mtcnn-faces'
-        face_dir = f'{export_dir}/{name}'
+        face_dir = f'{self.export_dir}/{name}'
 
-        if not os.path.exists(export_dir):
-            os.mkdir(export_dir)
+        if not os.path.exists(self.export_dir):
+            os.mkdir(self.export_dir)
         if not os.path.exists(face_dir):
             os.mkdir(face_dir)
 
@@ -190,7 +242,10 @@ class NeuralFaceExtract(object):
                 path = f'{face_dir}/{face_no}-{frame_no}.jpg'
                 im.save(path)
 
-    def extract_all(self, filenames=None, every_n_frames=20):
+    def extract_all(
+        self, filenames=None, every_n_frames=20,
+        export_size=256, skip_detect=None
+    ):
         self.filename_log = []
         self.num_face_log = []
         self.frame_log = []
@@ -216,7 +271,8 @@ class NeuralFaceExtract(object):
         # input(f'IN FILEPATHS {filepaths}')
         self.process_filepaths(
             filepaths, every_n_frames=every_n_frames,
-            batch_size=16, callback=self.callback
+            batch_size=16, callback=self.callback,
+            export_size=export_size, skip_detect=skip_detect
         )
 
         end_time = time.perf_counter()

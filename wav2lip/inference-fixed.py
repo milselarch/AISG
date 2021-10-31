@@ -294,6 +294,8 @@ def main():
 
         np_img_batch = np.transpose(img_batch, (0, 3, 1, 2))
         np_mel_batch = np.transpose(mel_batch, (0, 3, 1, 2))
+        print('NP SHAPE', np_img_batch.shape)
+
         img_batch = torch.FloatTensor(np_img_batch).to(device)
         mel_batch = torch.FloatTensor(np_mel_batch).to(device)
 

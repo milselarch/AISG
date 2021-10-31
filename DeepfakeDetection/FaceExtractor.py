@@ -241,16 +241,17 @@ class FaceExtractor(object):
     def faces_from_video(
         cls, np_frames, filename, rescale, export_size=256,
         every_n_frames=20, coords_scale=1, detector=None,
-        fill_face_maps=None
+        fill_face_maps=None, skip_detect=None
     ):
         if fill_face_maps is None:
             num_faces, face_mapping = cls.fill_face_maps(
                 np_frames, interval=every_n_frames,
-                detector=detector
+                detector=detector, skip_detect=skip_detect
             )
         else:
             num_faces, face_mapping = fill_face_maps(
-                np_frames, interval=every_n_frames
+                np_frames, interval=every_n_frames,
+                skip_detect=skip_detect
             )
 
         if every_n_frames > 10:
@@ -377,19 +378,29 @@ class FaceExtractor(object):
         return face_coords_df
 
     @staticmethod
-    def fill_face_maps(np_frames, interval, detector=None):
+    def fill_face_maps(
+        np_frames, interval, detector=None, skip_detect=None
+    ):
         if detector is None:
             detector = face_recognition.face_locations
 
         face_mapping = {}
         max_faces = 0
+        last_detect_frame = 0
+        face_locations = None
 
         for i in range(len(np_frames)):
             image = np_frames[i]
             frame_no = interval * i
-            face_locations = detector(image)
-            face_mapping[frame_no] = face_locations
 
+            if skip_detect is None:
+                face_locations = detector(image)
+                last_detect_frame = frame_no
+            elif frame_no - last_detect_frame >= skip_detect:
+                face_locations = detector(image)
+                last_detect_frame = frame_no
+
+            face_mapping[frame_no] = face_locations
             num_faces = len(face_locations)
             # print('faces', num_faces, max_faces)
             max_faces = max(max_faces, num_faces)

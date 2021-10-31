@@ -242,6 +242,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     return model
 
+
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     checkpoint_path = args.checkpoint_path
