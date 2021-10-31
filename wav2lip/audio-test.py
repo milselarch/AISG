@@ -168,13 +168,13 @@ gen = datagen(mel_chunks)
 pbar = tqdm(gen, total=total)
 
 for i, mel_batch in enumerate(pbar):
-    print(mel_batch.shape)
+    print('MEL', mel_batch.shape)
     np_mel_batch = np.transpose(mel_batch, (0, 3, 1, 2))
     mel_batch = torch.FloatTensor(np_mel_batch).to(device)
 
     with torch.no_grad():
         audio_pred = model.encode_audio(mel_batch)
         print('AUDIO PRED', audio_pred.shape)
-        print(audio_pred)
+        # print(audio_pred)
 
     continue
