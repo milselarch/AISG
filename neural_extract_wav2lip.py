@@ -1,14 +1,40 @@
 import pandas as pd
 import datasets
+import datetime
+import cProfile
 
 from NeuralFaceExtract import NeuralFaceExtract
 
+dt = datetime.datetime.now()
+stamp = dt.strftime('%Y%m%d-%H%M%S')
+profile_path = f'stats/neural-extract-{stamp}.profile'
+
 dataset = datasets.Dataset(basedir='datasets')
 filenames = dataset.all_videos[:].tolist()
+# filenames = ['9584bf852635aabe.mp4']
+# filenames = ['15131c1ca037f1f8.mp4']
+# filenames = ['0a4da6b49315507c.mp4']
 
-extractor = NeuralFaceExtract()
-extractor.export_dir = 'datasets-local/mtcnn-wav2lip'
-extractor.extract_all(
-    filenames, every_n_frames=1,
-    skip_detect=10, export_size=96
-)
+def crop_bottom(image, face):
+    if face.frame_no % 20 == 0:
+        return image
+
+    height = image.shape[0]
+    image = image[height//2:, :]
+    return image
+
+
+if __name__ == '__main__':
+    profile = cProfile.Profile()
+    profile.enable()
+
+    extractor = NeuralFaceExtract()
+    extractor.export_dir = 'datasets-local/mtcnn-wav2lip'
+    extractor.extract_all(
+        filenames, every_n_frames=1,
+        skip_detect=10, export_size=96,
+        img_filter=crop_bottom
+    )
+
+    profile.disable()
+    profile.dump_stats(profile_path)

@@ -78,6 +78,12 @@ class VideoArray(object):
         ])
         return f'{class_name}({kwargs})'
 
+    def release(self):
+        if self.raw_video is not None:
+            self.raw_video.release()
+
+        return True
+
     def get_grayscale_frames(self):
         gray_frames = []
 
@@ -110,6 +116,19 @@ class VideoArray(object):
         x_scale = self.width / (x_end - x_start)
         y_scale = self.height / (y_end - y_start)
         return x_scale, y_scale
+
+    def auto_resize_inplace(self, *args, **kwargs):
+        resolution = (self.width, self.height)
+        coords = self.cut_blackout2(self.out_video, *args, **kwargs)
+        x_start, x_end, y_start, y_end = coords.to_tuple()
+        # print(f'COORDS {coords}')
+        resized_frames = []
+
+        for k in range(len(self.out_video)):
+            frame = self.out_video[k]
+            cropped_frame = frame[y_start:y_end, x_start:x_end]
+            resized_frame = cv2.resize(cropped_frame, resolution)
+            self.out_video[k] = resized_frame
 
     def auto_resize(self, *args, **kwargs):
         resolution = (self.width, self.height)

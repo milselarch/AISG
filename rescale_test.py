@@ -26,7 +26,7 @@ vid_obj = load_video(
     scale=scale
 )
 
-blackout = vid_obj.cut_blackout2(vid_obj.out_video)
+blackout = vid_obj.cut_blackout(vid_obj.out_video)
 left, right, top, bottom = blackout.to_tuple()
 np_frames = vid_obj.out_video
 image = np_frames[0]
