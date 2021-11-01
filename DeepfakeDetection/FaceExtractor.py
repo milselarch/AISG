@@ -92,7 +92,7 @@ class Area(object):
 class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
-        frame_no: int, num_faces: int
+        frame_no: int, num_faces: int, detected: bool
     ):
         assert len(coords) == 4
         self.image = image
@@ -101,6 +101,7 @@ class FaceImage(object):
         self.face_no = face_no
         self.frame_no = frame_no
         self.num_faces = num_faces
+        self.detected = detected
 
     def rescale_coords(self, rescale):
         assert rescale > 0
@@ -244,20 +245,20 @@ class FaceExtractor(object):
         fill_face_maps=None, skip_detect=None
     ):
         if fill_face_maps is None:
-            num_faces, face_mapping = cls.fill_face_maps(
+            face_map_result = cls.fill_face_maps(
                 np_frames, interval=every_n_frames,
                 detector=detector, skip_detect=skip_detect
             )
         else:
-            num_faces, face_mapping = fill_face_maps(
+            face_map_result = fill_face_maps(
                 np_frames, interval=every_n_frames,
                 skip_detect=skip_detect
             )
 
-        if every_n_frames > 10:
-            min_frames = 7
-        else:
-            min_frames = 13
+        num_faces = face_map_result[0]
+        face_mapping = face_map_result[1]
+        detect_frame_nos = face_map_result[2]
+        face_crop_map = face_map_result[3]
 
         faces_df = cls.face_map_to_df(
             np_frames, num_faces, face_mapping,
@@ -289,23 +290,36 @@ class FaceExtractor(object):
             face_image_map[shifted_face_no] = face_images
 
             for i, row in enumerate(face_rows):
-                frame = np_frames[i]
+                # frame = np_frames[i]
+                frame_no = row['frames']
+
+                if frame_no in detect_frame_nos:
+                    detected = True
+                else:
+                    detected = False
+
                 coords = cls.extract_coords(
                     i, face_rows, every_n_frames=every_n_frames
                 )
 
                 top, left, right, bottom = coords
+                face_box = (left, top, right, bottom)
+                face_key = (frame_no, face_box)
+                face_crop, ratio = face_crop_map[face_key]
+
+                """
                 face_crop, ratio = cls.get_square_face(
                     frame, top, left, right, bottom,
                     export_size=export_size, rescale=rescale,
                     rescale_ratios=None
                 )
+                """
 
-                frame_no = row['frames']
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
                     face_no=shifted_face_no, frame_no=frame_no,
-                    num_faces=num_export_faces
+                    num_faces=num_export_faces,
+                    detected=detected
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)
@@ -545,9 +559,9 @@ class FaceExtractor(object):
         return top, left, right, bottom
 
     @classmethod
-    def get_square_face(
+    def get_square_face_coords(
         cls, frame, top, left, right, bottom,
-        rescale_ratios=None, export_size=256, rescale=1
+        rescale_ratios=None, rescale=1
     ):
         img_width = frame.shape[1]
         img_height = frame.shape[0]
@@ -589,19 +603,38 @@ class FaceExtractor(object):
         f_left = int(f_left * rescale)
         f_right = int(f_right * rescale)
         f_bottom = int(f_bottom * rescale)
-        face_crop = frame[f_top:f_bottom, f_left:f_right]
-        # print('SCALE', x_scale, y_scale)
 
         # new_width = int(face_crop.shape[1] * x_scale)
         # new_height = int(face_crop.shape[0] * y_scale)
         scaled_width = int((f_right - f_left) * x_scale)
         scaled_height = int((f_bottom - f_top) * y_scale)
         ratio = scaled_width / scaled_height
+
+        coords = (f_top, f_left, f_right, f_bottom)
+        return coords, ratio
+
+    @classmethod
+    def get_square_face(
+        cls, frame, top, left, right, bottom,
+        rescale_ratios=None, export_size=256, rescale=1
+    ):
+        face_coords, ratio = cls.get_square_face_coords(
+            frame, top, left, right, bottom,
+            rescale_ratios=rescale_ratios, rescale=rescale
+        )
+
+        f_top, f_left, f_right, f_bottom = face_coords
+        face_crop = frame[f_top:f_bottom, f_left:f_right]
+        # print('SCALE', x_scale, y_scale)
+
         """
         face_crop = cv2.resize(
             face_crop, (scaled_width, scaled_height)
         )
         """
+        scaled_width = int(f_right - f_left)
+        scaled_height = int(f_bottom - f_top)
+        # ratio = scaled_width / scaled_height
         dimensions = (scaled_width, scaled_height)
         face_crop = cv2.resize(face_crop, dimensions)
         width, height = face_crop.shape[1], face_crop.shape[0]
