@@ -272,9 +272,7 @@ class FaceExtractor(object):
         )
 
         if len(sorted_face_frames) > 1:
-            excluded_faces = cls.exclude_faces(
-                sorted_face_frames, min_frames=min_frames
-            )
+            excluded_faces = cls.exclude_faces(sorted_face_frames)
         else:
             excluded_faces = []
 
