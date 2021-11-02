@@ -276,6 +276,7 @@ class FaceExtractor(object):
         else:
             excluded_faces = []
 
+        print('EXCLUDE', excluded_faces)
         face_image_map, shifted_face_no = {}, 0
         num_export_faces = num_faces - len(excluded_faces)
 
@@ -301,17 +302,22 @@ class FaceExtractor(object):
                 )
 
                 top, left, right, bottom = coords
-                face_box = (left, top, right, bottom)
-                face_key = (frame_no, face_box)
-                face_crop, ratio = face_crop_map[face_key]
-
                 """
                 face_crop, ratio = cls.get_square_face(
-                    frame, top, left, right, bottom,
-                    export_size=export_size, rescale=rescale,
-                    rescale_ratios=None
+                   frame, top, left, right, bottom,
+                   export_size=export_size, rescale=rescale,
+                   rescale_ratios=None
                 )
                 """
+
+                face_box = (left, top, right, bottom)
+                face_key = (frame_no, face_box)
+
+                try:
+                    face_crop, ratio = face_crop_map[face_key]
+                except KeyError:
+                    assert not detected
+                    continue
 
                 face_image = FaceImage(
                     image=face_crop, coords=coords,

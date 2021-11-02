@@ -14,6 +14,8 @@ filenames = dataset.all_videos[:].tolist()
 # filenames = ['9584bf852635aabe.mp4']
 # filenames = ['15131c1ca037f1f8.mp4']
 # filenames = ['0a4da6b49315507c.mp4']
+# filenames = ['a09d90703e755a13.mp4']
+# filenames = ['f45a1fd86d66e669.mp4']
 
 def crop_bottom(image, face):
     if face.frame_no % 20 == 0:
