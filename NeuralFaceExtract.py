@@ -113,12 +113,15 @@ class NeuralFaceExtract(object):
 
             if prev_bboxes is not None:
                 # extract face images
-                for bbox in prev_bboxes:
-                    bbox_tuple = bbox.astype(int)
-                    bbox_tuple = tuple(bbox_tuple.tolist())
-                    key = (frame_no, bbox_tuple)
+                for k, bbox in enumerate(prev_bboxes):
+                    bbox = bbox.astype(int)
+                    bbox = np.clip(bbox, a_max=999999, a_min=0)
+                    prev_bboxes[k] = bbox
 
+                    bbox_tuple = tuple(bbox.tolist())
+                    key = (frame_no, bbox_tuple)
                     left, top, right, bottom = bbox
+
                     extraction = FaceExtractor.get_square_face(
                         np_frame, top, left, right, bottom,
                         rescale_ratios=None, rescale=1,
@@ -172,7 +175,8 @@ class NeuralFaceExtract(object):
                     continue
 
                 bbox = bbox.astype(int)
-                bbox = np.clip(bbox, a_max=999999, a_min=0)
+                # bbox = np.clip(bbox, a_max=999999, a_min=0)
+                assert min(bbox) >= 0
                 # print(f'BBOX {k} {frame_no} {bbox} {bconf}')
                 left, top, right, bottom = bbox
 

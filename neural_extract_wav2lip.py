@@ -40,3 +40,4 @@ if __name__ == '__main__':
 
     profile.disable()
     profile.dump_stats(profile_path)
+    print(f'profile save to {profile_path}')

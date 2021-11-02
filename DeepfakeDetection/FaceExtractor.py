@@ -312,12 +312,7 @@ class FaceExtractor(object):
 
                 face_box = (left, top, right, bottom)
                 face_key = (frame_no, face_box)
-
-                try:
-                    face_crop, ratio = face_crop_map[face_key]
-                except KeyError:
-                    assert not detected
-                    continue
+                face_crop, ratio = face_crop_map[face_key]
 
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
