@@ -276,7 +276,7 @@ class FaceExtractor(object):
         else:
             excluded_faces = []
 
-        print('EXCLUDE', excluded_faces)
+        # print('EXCLUDE', excluded_faces)
         face_image_map, shifted_face_no = {}, 0
         num_export_faces = num_faces - len(excluded_faces)
 
