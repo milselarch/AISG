@@ -180,6 +180,9 @@ class SyncnetTrainer(object):
 
         return score
 
+    def face_predict(self, face_samples, melspectogram, fps):
+        raise NotImplemented
+
     def predict_file(self, filepath:str):
         raise NotImplemented
 

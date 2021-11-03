@@ -12,12 +12,16 @@ wav = audio.load_wav(audio_path, hparams.sample_rate)
 orig_mel = audio.melspectrogram(wav).T
 mels = []
 
+# length = len(orig_mel)
+length = 5
 
-for k in range(len(orig_mel)):
+for k in range(length):
     mel = orig_mel[0:syncnet_mel_step_size, :]
-    mels.append(mel.T)
-    assert mel.shape[0] == syncnet_mel_step_size
+    torch_mel = torch.FloatTensor(mel.T).unsqueeze(0).unsqueeze(0)
+    mels.append(torch_mel)
+    # assert mel.shape[0] == syncnet_mel_step_size
 
-melp = torch.FloatTensor(mels).unsqueeze(0)
+melp = torch.cat(mels)
+print('INPUT SHAPE', melp.shape)
 audio_embeds = model.audio_encoder(melp)
-print(audio_embeds)
+print('AUDIO SHAPE', audio_embeds.shape)
