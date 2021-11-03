@@ -10,7 +10,7 @@ class VideoEmpty(Exception):
 class LazyVideo(object):
     def __init__(
         self, cap, every_n_frames=None, specific_frames=None,
-        scale=1, max_frames=None, to_rgb=True
+        scale=1, max_frames=None, to_rgb=True, reset_index=True
     ):
         assert every_n_frames or specific_frames, (
             "Must supply either every n_frames or specific_frames"
@@ -21,6 +21,9 @@ class LazyVideo(object):
 
         if type(cap) == str:
             cap = cv2.VideoCapture(cap)
+        elif reset_index:
+            # make sure cap starts at frame -1
+            cap.set(cv2.CAP_PROP_POS_FRAMES, - 1)
 
         self.cap = cap
         self._released = False
@@ -45,7 +48,6 @@ class LazyVideo(object):
         self.specific_frames = specific_frames
         self.scale = scale
         self.to_rgb = to_rgb
-
         self.cutout = None
 
     def resolve_batch(self, batch):
