@@ -1,6 +1,7 @@
 import pandas as pd
 import datasets
 import datetime
+import traceback
 import cProfile
 
 from NeuralFaceExtract import NeuralFaceExtract
@@ -16,6 +17,7 @@ filenames = dataset.all_videos[:].tolist()
 # filenames = ['0a4da6b49315507c.mp4']
 # filenames = ['a09d90703e755a13.mp4']
 # filenames = ['f45a1fd86d66e669.mp4']
+# filenames = ['a161b256a9dcd783.mp4']  # empty
 
 def crop_bottom(image, face):
     if face.frame_no % 20 == 0:
@@ -32,11 +34,16 @@ if __name__ == '__main__':
 
     extractor = NeuralFaceExtract()
     extractor.export_dir = 'datasets-local/mtcnn-wav2lip'
-    extractor.extract_all(
-        filenames, every_n_frames=1,
-        skip_detect=10, export_size=96,
-        img_filter=crop_bottom
-    )
+
+    try:
+        extractor.extract_all(
+            filenames, every_n_frames=1,
+            skip_detect=10, export_size=96,
+            img_filter=crop_bottom
+        )
+    except Exception as e:
+        print(traceback.format_exc())
+        print('EXTRACTION FAILED')
 
     profile.disable()
     profile.dump_stats(profile_path)

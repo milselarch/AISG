@@ -24,13 +24,14 @@ class LazyVideo(object):
 
         self.cap = cap
         self._released = False
-        self._frame_index = 0
+        self._frame_index = -1
 
         self.n_frames_in = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # print(f'N FRAMES IN', self.n_frames_in)
 
-        if self.n_frames_in is None:
+        if self.n_frames_in == 0:
             raise VideoEmpty
 
         if max_frames:
@@ -97,12 +98,22 @@ class LazyVideo(object):
         return frame
 
     def grab_raw_frame(self, frame_no):
-        if self._frame_index != frame_no - 1:
-            self._frame_index = -1
+        if self._frame_index >= frame_no:
+            # if current frame index is more than frame_no
+            # we have to set the capture frame no (very slow)
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no - 1)
+            self._frame_index = frame_no - 1
 
+        assert frame_no > self._frame_index
+        while frame_no - self._frame_index > 1:
+            # grab skips ahead by 1 frame
+            self.cap.grab()
+            self._frame_index += 1
+
+        # read skips ahead 1 frame, and reads it
         res, frame = self.cap.read()
         self._frame_index += 1
+        assert self._frame_index == frame_no
         return frame
 
     @property
