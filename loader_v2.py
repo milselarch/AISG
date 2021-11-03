@@ -32,6 +32,7 @@ class LazyVideo(object):
         self.n_frames_in = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps = int(cap.get(cv2.CAP_PROP_FPS))
         # print(f'N FRAMES IN', self.n_frames_in)
 
         if self.n_frames_in == 0:

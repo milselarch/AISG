@@ -60,6 +60,11 @@ class SyncDataset(object):
             transforms.ToTensor(),
             transforms.Normalize([0.5] * 3, [0.5] * 3)
         ])
+        self.h_transform = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5] * 3, [0.5] * 3)
+        ])
 
         self.face_base_dir = '../datasets-local/mtcnn-faces'
         self.video_base_dir = '../datasets/train/videos'
@@ -387,26 +392,13 @@ class SyncDataset(object):
             if window_fnames is None:
                 continue
 
-            for fname in window_fnames:
-                img = cv2.imread(fname)
-
-                if img is None:
-                    all_read = False
-                    break
-                try:
-                    img = cv2.resize(img, (hparams.img_size, hparams.img_size))
-                except Exception as e:
-                    all_read = False
-                    break
-
-            raise NotImplemented
-
-            image = self.pil_loader(image_path)
-            image = self.transform(image)
-            bottom_img = image[:, image.shape[1]//2:]
+            image_window = self.load_image_window(window_fnames)
+            # image = self.pil_loader(image_path)
+            # image = self.transform(image)
+            # bottom_img = image[:, image.shape[1]//2:]
 
             mel = self.cache.safe_pop_fake_mel(is_training)
-            self.cache.add(train_type, frame_key, bottom_img, mel)
+            self.cache.add(train_type, frame_key, image_window, mel)
 
     def build_sample_loop(self):
         while not self.kill:
@@ -465,6 +457,34 @@ class SyncDataset(object):
             window_fnames.append(frame_path)
 
         return window_fnames
+
+    @staticmethod
+    def load_image_window(window_fnames, mirror_prob=0.5):
+        # need to implement flipping
+        size = hparams.size
+        image_window = []
+
+        for item in window_fnames:
+            if type(item) is str:
+                img = cv2.imread(filename)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            else:
+                img = item
+
+            if img is None:
+                return False
+
+            if img.shape[0] != img.shape[1]:
+                assert img.shape[0] == img.shape[1] // 2
+                img = cv2.resize(img, (size, size // 2))
+            else:
+                img = cv2.resize(img, (size, size))
+                img = img[image.shape[0] // 2:, :]
+
+            assert img.shape[0] == img.shape[1] // 2
+            image_window.append(img)
+
+        return image_window
 
     def _get_window(self, start_frame):
         start_id = self.get_frame_id(start_frame)

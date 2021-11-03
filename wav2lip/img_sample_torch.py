@@ -15,7 +15,8 @@ transform = transforms.Compose([
     transforms.Normalize([0.5] * 3, [0.5] * 3)
 ])
 
-model = SyncNet_color(107)
+syncnet_T = 5
+model = SyncNet_color(syncnet_T)
 
 def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
     with open(path, 'rb') as f:
@@ -29,7 +30,7 @@ def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
 basedir = '../datasets-local/mtcnn-faces/3a3d68bceddb6dab'
 window = []
 
-for filename in os.listdir(basedir):
+for filename in os.listdir(basedir)[:syncnet_T]:
     path = f'{basedir}/{filename}'
 
     pil_img = pil_loader(path)

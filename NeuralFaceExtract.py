@@ -17,6 +17,7 @@ import gc
 
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from torch.utils.data import DataLoader
+from FaceImageMap import FaceImageMap
 from PIL import Image, ImageDraw
 from datetime import datetime
 from tqdm.auto import tqdm
@@ -113,10 +114,10 @@ class NeuralFaceExtract(object):
 
             if prev_bboxes is not None:
                 # extract face images
-                for k, bbox in enumerate(prev_bboxes):
+                for i, bbox in enumerate(prev_bboxes):
                     bbox = bbox.astype(int)
                     bbox = np.clip(bbox, a_max=999999, a_min=0)
-                    prev_bboxes[k] = bbox
+                    prev_bboxes[i] = bbox
 
                     bbox_tuple = tuple(bbox.tolist())
                     key = (frame_no, bbox_tuple)
@@ -210,7 +211,8 @@ class NeuralFaceExtract(object):
         pbar = tqdm(filepaths)
 
         for filepath in pbar:
-            pbar.set_description(filepath)
+            name = os.path.basename(filepath)
+            pbar.set_description(name)
 
             if base_dir is not None:
                 filepath = f'{base_dir}/{filepath}'
@@ -229,7 +231,10 @@ class NeuralFaceExtract(object):
             )
 
             if vid_obj is None:
-                callback(filepath, None, pbar)
+                callback(
+                    filepath=filepath, face_image_map=None,
+                    pbar=pbar
+                )
                 continue
 
             # vid_obj = vid_obj.auto_resize()
@@ -247,15 +252,17 @@ class NeuralFaceExtract(object):
                 )
             )
 
+            face_image_map = FaceImageMap(
+                face_image_map, fps=vid_obj.fps
+            )
+
             callback(
                 filepath=filepath, face_image_map=face_image_map,
                 pbar=pbar, img_filter=img_filter
             )
 
             vid_obj.release()
-
-            del vid_obj
-            del video_cap
+            del vid_obj, video_cap
             gc.collect()
 
     def callback(
