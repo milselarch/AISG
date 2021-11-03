@@ -224,8 +224,8 @@ class NeuralFaceExtract(object):
                 scale = 1
 
             vid_obj = loader.load_video(
-                filepath, every_n_frames=every_n_frames,
-                scale=scale
+                video_cap, every_n_frames=every_n_frames,
+                scale=scale, reset_index=False
             )
 
             if vid_obj is None:
@@ -253,6 +253,8 @@ class NeuralFaceExtract(object):
             )
 
             vid_obj.release()
+            del video_cap
+            del vid_obj
 
     def callback(
         self, filepath, face_image_map, pbar=None,
