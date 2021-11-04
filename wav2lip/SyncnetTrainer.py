@@ -155,7 +155,8 @@ class SyncnetTrainer(object):
         return score
 
     def batch_validate(
-        self, episode_no, batch_size=None, fake_p=0.5
+        self, episode_no, batch_size=None, fake_p=0.5,
+        enter_eval_mode=False
     ):
         if batch_size is None:
             batch_size = self.batch_size
@@ -173,7 +174,8 @@ class SyncnetTrainer(object):
         t_labels = t_labels.to(self.device).detach()
 
         # self.optimizer.zero_grad()
-        self.model.train(False)
+        if enter_eval_mode:
+            self.model.train(False)
 
         with torch.no_grad():
             preds = self.model.predict(t_mels, t_images)
@@ -240,6 +242,11 @@ class SyncnetTrainer(object):
             mel_batch.append(torch_mel_sample)
             # print('TI', torch_img_sample.shape)
             # print('TM', torch_mel_sample.shape)
+
+        if len(img_batch) == 1:
+            print('SINGLE SAMPLE ONLY')
+            img_batch = [img_batch[0], img_batch[0]]
+            mel_batch = [mel_batch[0], mel_batch[0]]
 
         torch_img_batch = torch.cat(img_batch)
         torch_mel_batch = torch.cat(mel_batch)
