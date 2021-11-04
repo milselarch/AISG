@@ -49,6 +49,8 @@ class LazyVideo(object):
         self.specific_frames = specific_frames
         self.scale = scale
         self.to_rgb = to_rgb
+
+        self.allow_resize = True
         self.cutout = None
 
     def resolve_batch(self, batch):
@@ -59,12 +61,16 @@ class LazyVideo(object):
 
         for k, frame in enumerate(batch):
             assert isinstance(frame, LazyFrame)
-            out_video[k] = frame.to_numpy()
+            out_video[k] = frame.to_numpy(cache=True)
 
         return out_video
 
+    def force_no_resize(self):
+        self.allow_resize = False
+
     def auto_resize_inplace(self, *args, **kwargs):
         # resolution = (self.width, self.height)
+        assert self.allow_resize
         self.cutout = self.cut_blackout(
             self.out_video, *args, **kwargs
         )
@@ -218,10 +224,18 @@ class LazyFrame(object):
     def __init__(self, frame_no: int, video: LazyVideo):
         self.video = video
         self.frame_no = frame_no
+        self.__raw_np_frame = None
 
-    def to_numpy(self):
-        return self.video.load_frame(self.frame_no)
+    def to_numpy(self, cache=False):
+        if self.__raw_np_frame is not None:
+            return self.__raw_np_frame
 
+        np_frame = self.video.load_frame(self.frame_no)
+        if cache:
+            assert not self.video.allow_resize
+            self.__raw_np_frame = np_frame
+
+        return np_frame
 
 def load_video(*args, **kwargs):
     try:

@@ -52,11 +52,14 @@ class NeuralFaceExtract(object):
 
     def extract_faces(
         self, frames, batch_size, interval,
-        skip_detect=None, export_size=256
+        skip_detect=None, ignore_detect=None, export_size=256
     ):
         sub_frames = []
         sub_frame_nos = []
         last_frame_no = 0
+
+        if ignore_detect is None:
+            ignore_detect = interval
 
         for k in range(len(frames)):
             frame_no = interval * k
@@ -96,25 +99,31 @@ class NeuralFaceExtract(object):
         detect_frame_nos = []
         face_crop_map = {}
 
-        last_frame_no = 0
+        last_detect_frame_no = 0
 
         for k in range(len(frames)):
             frame = frames[k]
             # if we can directly optimise not needing
             # np_frame, theres room for improvement
-            np_frame = frame.to_numpy()
             frame_no = interval * k
+            np_frame = None
 
             if frame_no in detect_map:
                 prev_bboxes, prev_bconfs = detect_map[frame_no]
                 detect_frame_nos.append(frame_no)
-            elif last_frame_no - frame_no > skip_detect:
+                last_detect_frame_no = frame_no
+            elif frame_no - last_detect_frame_no >= skip_detect:
                 prev_bboxes, prev_bconfs = None, None
                 # detect_frame_nos.append(frame_no)
+            elif frame_no - last_detect_frame_no >= ignore_detect:
+                prev_bboxes, prev_bconfs = None, None
 
             if prev_bboxes is not None:
                 # extract face images
                 for i, bbox in enumerate(prev_bboxes):
+                    if np_frame is None:
+                        np_frame = frame.to_numpy()
+
                     bbox = bbox.astype(int)
                     bbox = np.clip(bbox, a_max=999999, a_min=0)
                     prev_bboxes[i] = bbox
@@ -140,11 +149,12 @@ class NeuralFaceExtract(object):
 
     def fill_face_maps(
         self, frames, interval, batch_size, skip_detect=None,
-        export_size=256
+        ignore_detect=None, export_size=256
     ):
         extract_result = self.extract_faces(
             frames, batch_size=batch_size, interval=interval,
-            skip_detect=skip_detect, export_size=export_size
+            skip_detect=skip_detect, ignore_detect=ignore_detect,
+            export_size=export_size
         )
 
         frame_face_boxes = extract_result[0]
@@ -198,7 +208,7 @@ class NeuralFaceExtract(object):
     def process_filepaths(
         self, filepaths, callback=lambda *args, **kwargs: None,
         every_n_frames=20, batch_size=16, base_dir=None,
-        export_size=256, skip_detect=None,
+        export_size=256, skip_detect=None, ignore_detect=None,
         img_filter=lambda x, f: x
     ):
         """
@@ -239,6 +249,8 @@ class NeuralFaceExtract(object):
 
             # vid_obj = vid_obj.auto_resize()
             vid_obj.auto_resize_inplace()
+            vid_obj.force_no_resize()
+
             print(f'{filepath} SCALE {scale}')
             # np_frames = vid_obj.out_video
 
@@ -246,9 +258,10 @@ class NeuralFaceExtract(object):
                 vid_obj, rescale=1, filename=filepath,
                 every_n_frames=every_n_frames, coords_scale=scale,
                 export_size=export_size, skip_detect=skip_detect,
+                ignore_detect=ignore_detect,
                 fill_face_maps=functools.partial(
                     self.fill_face_maps,  batch_size=batch_size,
-                    skip_detect=skip_detect, export_size=export_size
+                    export_size=export_size
                 )
             )
 
@@ -326,7 +339,7 @@ class NeuralFaceExtract(object):
 
     def extract_all(
         self, filenames=None, every_n_frames=20,
-        export_size=256, skip_detect=None,
+        export_size=256, skip_detect=None, ignore_detect=None,
         img_filter=lambda x, f: x
     ):
         self.filename_log = []
@@ -356,7 +369,7 @@ class NeuralFaceExtract(object):
             filepaths, every_n_frames=every_n_frames,
             batch_size=16, callback=self.callback,
             export_size=export_size, skip_detect=skip_detect,
-            img_filter=img_filter
+            ignore_detect=ignore_detect, img_filter=img_filter
         )
 
         end_time = time.perf_counter()

@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 from PIL import Image, ImageOps
 from matplotlib import pyplot as plt
-from models.syncnet import SyncNet_color
+from models.syncnet_v2 import SyncNet_color
 
 transform = transforms.Compose([
     transforms.Resize((128, 256)),
@@ -25,26 +25,6 @@ def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
             image = ImageOps.mirror(image)
 
         return image.convert('RGB')
-
-def cv_loader(path: str, mirror_prob=0.5):
-    img = cv2.imread(path)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    size = 96
-
-    if img.shape[0] != img.shape[1]:
-        assert img.shape[0] == img.shape[1] // 2
-        img = cv2.resize(img, (size, size // 2))
-    else:
-        img = cv2.resize(img, (size, size))
-        img = img[img.shape[0] // 2:, :]
-
-    if random.random() < mirror_prob:
-        print(f'FLIP')
-        img = cv2.flip(img, 1)
-    else:
-        print('NO-FLIP')
-
-    return img
 
 
 # basedir = '../datasets-local/mtcnn-faces/3a3d68bceddb6dab'

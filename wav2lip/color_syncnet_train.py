@@ -57,9 +57,7 @@ class Dataset(object):
         # num_frames = (T x hop_size * fps) / sample_rate
         start_frame_num = self.get_frame_id(start_frame)
         start_idx = int(80. * (start_frame_num / float(hparams.fps)))
-
         end_idx = start_idx + syncnet_mel_step_size
-
         return spec[start_idx : end_idx, :]
 
     def __len__(self):

@@ -13,6 +13,9 @@ class FaceImageMap(object):
     def get_face_frames(self, face_no):
         return self.face_image_map[face_no]
 
+    def __len__(self):
+        return len(self.face_image_map)
+
     def __repr__(self):
         name = self.__class__.__name__
         return f'{name}({repr(self.face_image_map)})'
