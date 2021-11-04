@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 from PIL import Image, ImageOps
 from matplotlib import pyplot as plt
-from models.syncnet import SyncNet_color
+from models.syncnet_v2 import SyncNet_color
 
 transform = transforms.Compose([
     transforms.Resize((256, 256)),

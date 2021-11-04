@@ -1,3 +1,4 @@
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -5,13 +6,12 @@ from torch.nn import functional as F
 from .conv import Conv2d
 
 class SyncNet_color(nn.Module):
-    def __init__(self, syncnet_T=64):
+    def __init__(self, syncnet_T, num_dense_neurons=32):
         super(SyncNet_color, self).__init__()
-        self.syncnet_T = syncnet_T
 
         self.face_encoder = nn.Sequential(
             Conv2d(
-                self.syncnet_T * 3, 32, kernel_size=(7, 7),
+                syncnet_T * 3, 32, kernel_size=(7, 7),
                 stride=1, padding=3
             ),
 
@@ -34,7 +34,8 @@ class SyncNet_color(nn.Module):
 
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=0),
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0),)
+            Conv2d(512, 512, kernel_size=1, stride=1, padding=0)
+        )
 
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
@@ -54,7 +55,13 @@ class SyncNet_color(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0),
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0),)
+            Conv2d(512, 512, kernel_size=1, stride=1, padding=0)
+        )
+
+        self.dense_layer = nn.ModuleList([
+            nn.Linear(1024, num_dense_neurons),
+            nn.Linear(num_dense_neurons, 1)
+        ])
 
     def forward(self, audio_sequences, face_sequences):
         # audio_sequences := (B, dim, T)
@@ -70,7 +77,27 @@ class SyncNet_color(nn.Module):
 
     def predict(self, *args, **kwargs):
         audio_embed, face_embed = self(*args, **kwargs)
-        print('EMBEDS', audio_embed.shape, face_embed.shape)
+        # print('EMBEDS', audio_embed.shape, face_embed.shape)
         cosine_similarity = nn.functional.cosine_similarity
         similarity = cosine_similarity(audio_embed, face_embed)
         return 1.0 - similarity
+
+    def pred_fcc(self, audios, images, fcc_ratio=0.8):
+        audio_embeds, image_embeds = self(audios, images)
+        cosine_similarity = nn.functional.cosine_similarity
+        similarity = cosine_similarity(audio_embeds, face_embeds)
+        cosine_fakeness = 1.0 - similarity
+
+        flat_audio_embeds = torch.flatten(audio_embeds, start_dim=1)
+        flat_image_embeds = torch.flatten(image_embeds, start_dim=1)
+        flat_embeds = torch.cat(
+            [flat_image_embeds, flat_audio_embeds], dim=-1
+        )
+
+        prediction = self.dense_layer(flat_embeds)
+        combined_pred = (
+            (1-fcc_ratio) * cosine_fakeness +
+            fcc_ratio * prediction
+        )
+
+        return combined_pred

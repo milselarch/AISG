@@ -2,7 +2,7 @@ import audio
 import torch
 
 from hparams import hparams, get_image_list
-from models.syncnet import SyncNet_color
+from models.syncnet_v2 import SyncNet_color
 
 model = SyncNet_color()
 syncnet_mel_step_size = 16

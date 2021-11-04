@@ -14,10 +14,9 @@ try:
 except ImportError:
     print('WARNING: NO TENSORFLOW FOUND')
 
-import numpy as np
-
 import torch
 import torch.nn as nn
+import numpy as np
 import torchvision
 import torch.optim as optim
 import argparse
@@ -26,6 +25,7 @@ import cv2
 import os
 
 from models import SyncNet_color as SyncNet
+from hparams import hparams
 
 from tqdm.auto import tqdm
 from torch.optim import lr_scheduler
@@ -43,12 +43,13 @@ class SyncnetTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01,
-        preload_path=None
+        preload_path=None, is_checkpoint=True, syncnet_T=5,
+        strict=True
     ):
         self.date_stamp = self.make_date_stamp()
 
         self.name = 'color_syncnet'
-        self.syncnet_T = 1
+        self.syncnet_T = syncnet_T
         self.batch_size = 32
         self.epochs = 50
 
@@ -78,8 +79,11 @@ class SyncnetTrainer(object):
 
         # self.criterion = nn.CrossEntropyLoss()
         self.criterion = nn.BCELoss()
+        self.params = [
+            p for p in self.model.parameters() if p.requires_grad
+        ]
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=0.001,
+            self.params, lr=hparams.initial_learning_rate,
             betas=(0.9, 0.999), eps=1e-08
         )
         self.scheduler = lr_scheduler.StepLR(
@@ -88,8 +92,12 @@ class SyncnetTrainer(object):
 
         self.load_dataset = load_dataset
         self.dataset = SyncDataset(seed=seed, load=load_dataset)
+        
         if preload_path is not None:
-            self.load_model(preload_path)
+            if is_checkpoint:
+                self.load_checkpoint(preload_path, strict=strict)
+            else:
+                self.load_model(preload_path)
 
     def transform(self, image):
         return self.dataset.transform(image)
@@ -98,6 +106,8 @@ class SyncnetTrainer(object):
         self.model.load_state_dict(torch.load(model_path))
         if eval_mode:
             self.model.eval()
+
+        print(f'PRELOADED SYNCNET FROM {model_path}')
 
     def cosine_loss(self, audio_embed, face_embed, labels):
         d = nn.functional.cosine_similarity(audio_embed, face_embed)
@@ -180,8 +190,68 @@ class SyncnetTrainer(object):
 
         return score
 
-    def face_predict(self, face_samples, melspectogram, fps):
-        raise NotImplemented
+    def load_checkpoint(
+        self, checkpoint_path, reset_optimizer=False,
+        strict=True
+    ):
+        checkpoint = torch.load(checkpoint_path)
+        state_dict = checkpoint["state_dict"]
+
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            new_state_dict[k.replace('module.', '')] = v
+
+        self.model.load_state_dict(new_state_dict, strict=strict)
+
+        if reset_optimizer:
+            optimizer_state = checkpoint["optimizer"]
+            if optimizer_state is not None:
+                print(f"Loaded optimizer state")
+                self.optimizer.load_state_dict(
+                    checkpoint["optimizer"]
+                )
+
+        print(f'Loaded checkpoint from {checkpoint_path}')
+
+    def face_predict(
+        self, face_samples, melspectogram, fps,
+        transpose_audio=False, to_numpy=False
+    ):
+        img_batch, mel_batch = [], []
+
+        for sample_batch in face_samples:
+            first_face_image = sample_batch[0]
+            frame_no = first_face_image.frame_no
+
+            images = [f.image for f in sample_batch]
+            torch_img_sample = self.dataset.batch_image_window(
+                images, mirror_prob=0
+            )
+            torch_mel_sample = self.dataset.load_mel_batch(
+                melspectogram, fps=fps, frame_no=frame_no,
+                transpose=transpose_audio
+            )
+
+            # print(torch_mel_sample.shape[-1])
+            if self.dataset.is_incomplete_mel(torch_mel_sample):
+                continue
+
+            img_batch.append(torch_img_sample)
+            mel_batch.append(torch_mel_sample)
+            # print('TI', torch_img_sample.shape)
+            # print('TM', torch_mel_sample.shape)
+
+        torch_img_batch = torch.cat(img_batch)
+        torch_mel_batch = torch.cat(mel_batch)
+        predictions = self.model.predict(
+            torch_mel_batch, torch_img_batch
+        )
+
+        predictions = predictions.detach()
+        if to_numpy:
+            predictions = predictions.cpu().numpy()
+
+        return predictions
 
     def predict_file(self, filepath:str):
         raise NotImplemented

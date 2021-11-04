@@ -242,17 +242,18 @@ class FaceExtractor(object):
     def faces_from_video(
         cls, np_frames, filename, rescale, export_size=256,
         every_n_frames=20, coords_scale=1, detector=None,
-        fill_face_maps=None, skip_detect=None
+        fill_face_maps=None, skip_detect=None, ignore_detect=None
     ):
         if fill_face_maps is None:
             face_map_result = cls.fill_face_maps(
                 np_frames, interval=every_n_frames,
-                detector=detector, skip_detect=skip_detect
+                skip_detect=skip_detect, ignore_detect=ignore_detect,
+                detector=detector
             )
         else:
             face_map_result = fill_face_maps(
                 np_frames, interval=every_n_frames,
-                skip_detect=skip_detect
+                skip_detect=skip_detect, ignore_detect=ignore_detect
             )
 
         num_faces = face_map_result[0]
@@ -353,13 +354,14 @@ class FaceExtractor(object):
         np_frames, max_faces, face_mapping, every_n_frames,
         current_rescale, filename
     ):
-        face_coords_df = pd.DataFrame(columns=[
-            'filename', 'frames', 'face_no', 'num_faces',
-            'top', 'right', 'bottom', 'left'
-        ])
+        face_no_log = []
+        frame_no_log = []
+        num_faces_log = []
+        top_log, bottom_log = [], []
+        left_log, right_log = [], []
+        filename_log = []
 
-        detections, column = 0, 0
-
+        detections = 0
         for frame_no in face_mapping:
             # image = np_frames[frame_no // every_n_frames]
             # face_locations = face_recognition.face_locations(image)
@@ -381,18 +383,29 @@ class FaceExtractor(object):
                 bottom = int(bottom / current_rescale)
                 left = int(left / current_rescale)
 
-                face_coords_df.loc[column] = [
-                    filename, frame_no, face_no, num_faces,
-                    top, right, bottom, left
-                ]
+                filename_log.append(filename)
+                frame_no_log.append(frame_no)
+                face_no_log.append(face_no)
+                num_faces_log.append(num_faces)
 
-                column += 1
+                top_log.append(top)
+                left_log.append(left)
+                bottom_log.append(bottom)
+                right_log.append(right)
+
+        face_coords_df = pd.DataFrame(data={
+            'filename': filename_log, 'frames': frame_no_log,
+            'face_no': face_no_log, 'num_faces': num_faces_log,
+            'top': top_log, 'bottom': bottom_log,
+            'left': left_log, 'right': right_log
+        })
 
         return face_coords_df
 
     @staticmethod
     def fill_face_maps(
-        np_frames, interval, detector=None, skip_detect=None
+        np_frames, interval, detector=None, skip_detect=None,
+        ignore_detect=None
     ):
         if detector is None:
             detector = face_recognition.face_locations
@@ -413,7 +426,13 @@ class FaceExtractor(object):
                 face_locations = detector(image)
                 last_detect_frame = frame_no
 
-            face_mapping[frame_no] = face_locations
+            if ignore_detect is None:
+                face_mapping[frame_no] = face_locations
+            elif frame_no - last_detect_frame < ignore_detect:
+                face_mapping[frame_no] = face_locations
+            else:
+                face_mapping[frame_no] = None
+
             num_faces = len(face_locations)
             # print('faces', num_faces, max_faces)
             max_faces = max(max_faces, num_faces)

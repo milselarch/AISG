@@ -186,7 +186,7 @@ class SyncDataset(object):
         return labels, images, mels
 
     @staticmethod
-    def torch_batch(labels, images, mels):
+    def torchify_batch(labels, images, mels):
         torch_images = torch.cat(images)
         torch_images = torch.unsqueeze(torch_images, 0)
         """
@@ -239,6 +239,11 @@ class SyncDataset(object):
             build_process.start()
 
     @staticmethod
+    def m_print(cond, *args, **kwargs):
+        if cond:
+            print(*args, **kwargs)
+
+    @staticmethod
     def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
         with open(path, 'rb') as f:
             img = Image.open(f)
@@ -251,6 +256,63 @@ class SyncDataset(object):
                 img = ImageOps.mirror(img)
 
             return img.convert('RGB')
+
+    @classmethod
+    def cv_loader(
+        cls, img, mirror_prob=0.5, size=None,
+        verbose=False
+    ):
+        if type(img) is str:
+            img = cv2.imread(path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        if size is None:
+            size = hparams.img_size
+
+        if img.shape[0] != img.shape[1]:
+            assert img.shape[0] == img.shape[1] // 2
+            img = cv2.resize(img, (size, size // 2))
+        else:
+            img = cv2.resize(img, (size, size))
+            img = img[img.shape[0] // 2:, :]
+
+        if random.random() < mirror_prob:
+            cls.m_print(verbose, 'FLIP')
+            img = cv2.flip(img, 1)
+        else:
+            cls.m_print(verbose, 'NO_FLIP')
+
+        return img
+
+    @classmethod
+    def batch_image_window(cls, images, mirror_prob=0.5):
+        window = []
+        if random.random() < mirror_prob:
+            flip = 1
+        else:
+            flip = 0
+
+        for image in images:
+            image = cls.cv_loader(image, mirror_prob=flip)
+            window.append(image)
+
+        batch_x = np.concatenate(window, axis=2) / 255.
+        batch_x = batch_x.transpose(2, 0, 1)
+        torch_batch_x = torch.FloatTensor(batch_x)
+        torch_batch_x = torch.unsqueeze(torch_batch_x, 0)
+        return torch_batch_x
+
+    def load_mel_batch(
+        self, orig_mel, fps, frame_no, transpose=False
+    ):
+        orig_mel = orig_mel.T if transpose else orig_mel
+        mel = self.crop_audio_by_frame(
+            orig_mel, frame_no=frame_no, fps=fps
+        )
+
+        torch_batch_x = torch.FloatTensor(mel.T)
+        torch_batch_x = torch_batch_x.unsqueeze(0).unsqueeze(0)
+        return torch_batch_x
 
     def resolve_fps(self, filename):
         if filename not in self.fps_cache:
@@ -459,7 +521,7 @@ class SyncDataset(object):
         return window_fnames
 
     @staticmethod
-    def load_image_window(window_fnames, mirror_prob=0.5):
+    def batch_image_window_v1(window_fnames, mirror_prob=0.5):
         # need to implement flipping
         size = hparams.size
         image_window = []
@@ -500,14 +562,20 @@ class SyncDataset(object):
 
         return window_fnames
 
+    def is_incomplete_mel(self, torch_mel):
+        if self.syncnet_mel_step_size != torch_mel.shape[-1]:
+            return True
+
+        return False
+
     def crop_audio_by_frame(self, spec, frame_no, fps):
         # num_frames = (T x hop_size * fps) / sample_rate
         start_idx = int(80. * (frame_no / float(fps)))
         end_idx = start_idx + self.syncnet_mel_step_size
         return spec[start_idx: end_idx, :]
 
-    def crop_audio_window(self, spec, start_frame, fps):
+    def crop_audio_window(self, spec, frame_filename, fps):
         # num frames = len(spec) * fps / 80.0
         # num_frames = (T x hop_size * fps) / sample_rate
-        start_frame_num = self.get_frame_no(start_frame)
+        start_frame_num = self.get_frame_no(frame_filename)
         return self.crop_audio_by_frame(spec, start_frame_num, fps)
