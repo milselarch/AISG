@@ -46,7 +46,7 @@ class SyncDataset(object):
         self.syncnet_mel_step_size = 16
         self.syncnet_T = 1
 
-        self.sample_framerate = 20
+        self.sample_framerate = 10
         self.max_cache_size = 1000
         self.min_samples = 200
 
@@ -285,7 +285,9 @@ class SyncDataset(object):
         return img
 
     @classmethod
-    def batch_image_window(cls, images, mirror_prob=0.5):
+    def batch_image_window(
+        cls, images, mirror_prob=0.5, torchify=True
+    ):
         window = []
         if random.random() < mirror_prob:
             flip = 1
@@ -298,9 +300,12 @@ class SyncDataset(object):
 
         batch_x = np.concatenate(window, axis=2) / 255.
         batch_x = batch_x.transpose(2, 0, 1)
-        torch_batch_x = torch.FloatTensor(batch_x)
-        torch_batch_x = torch.unsqueeze(torch_batch_x, 0)
-        return torch_batch_x
+
+        if torchify:
+            batch_x = torch.FloatTensor(batch_x)
+            batch_x = torch.unsqueeze(batch_x, 0)
+
+        return batch_x
 
     def load_mel_batch(
         self, orig_mel, fps, frame_no, transpose=False
@@ -368,16 +373,16 @@ class SyncDataset(object):
         assert max_start_index > 0
         num_samples = int(num_frames / self.sample_framerate)
         indexes = random.sample(range(max_start_index), k=num_samples)
+        t_mel = orig_mel.T
 
         for start_index in indexes:
-            end_index = start_index + self.syncnet_mel_step_size
-            mel = orig_mel[start_index: end_index, :]
-            assert mel.shape[0] == self.syncnet_mel_step_size
+            torch_mels = self.load_mel_batch(t_mel, fps, start_index)
+            assert not self.is_incomplete_mel(torch_mels)
 
             if is_training:
-                self.cache.add_train_fake_mel(mel)
+                self.cache.add_train_fake_mel(torch_mels)
             else:
-                self.cache.add_test_fake_mel(mel)
+                self.cache.add_test_fake_mel(torch_mels)
 
     def load_audio(self, filename):
         filename = basename(filename)
@@ -409,20 +414,35 @@ class SyncDataset(object):
             ))
 
         image_paths = file_map[filename]
+        image_paths = self.filter_image_paths(image_paths)
         fps = self.resolve_fps(filename)
-        orig_mel = self.load_audio(filename)
+        orig_mel = self.load_audio(filename).T
 
         for image_path in image_paths:
             frame_no = self.get_frame_no(image_path)
-            # print(f'FRAME NO', frame_no)
-
-            image = self.pil_loader(image_path)
-            image = self.transform(image)
-            bottom_img = image[:, image.shape[1]//2:]
-
             frame_key = (filename, frame_no)
-            mel = self.crop_audio_by_frame(orig_mel, frame_no, fps)
-            self.cache.add(train_type, frame_key, bottom_img, mel)
+
+            window_fnames = self.get_window(image_path)
+            if window_fnames is None:
+                continue
+
+            torch_imgs = self.batch_image_window(window_fnames)
+            torch_mels = self.load_mel_batch(orig_mel, fps, frame_no)
+            if self.is_incomplete_mel(torch_mels):
+                continue
+
+            self.cache.add(
+                train_type, frame_key, torch_imgs, torch_mels
+            )
+
+    @staticmethod
+    def filter_image_paths(image_paths):
+        filtered_paths = []
+        for image_path in image_paths:
+            if image_path.endswith('0.jpg'):
+                filtered_paths.append(image_path)
+
+        return filtered_paths
 
     def load_fake_samples(
         self, filename=None, is_training=True
@@ -439,9 +459,12 @@ class SyncDataset(object):
             filename = random.choice(filenames)
 
         image_paths = file_map[filename]
+        image_paths = self.filter_image_paths(image_paths)
+
         num_frames = self.resolve_frames(filename)
         num_samples = int(num_frames / sample_framerate)
         num_samples = min(len(image_paths), num_samples)
+
         sample_paths = random.sample(
             image_paths, k=num_samples
         )
@@ -454,7 +477,7 @@ class SyncDataset(object):
             if window_fnames is None:
                 continue
 
-            image_window = self.load_image_window(window_fnames)
+            image_window = self.batch_image_window(window_fnames)
             # image = self.pil_loader(image_path)
             # image = self.transform(image)
             # bottom_img = image[:, image.shape[1]//2:]

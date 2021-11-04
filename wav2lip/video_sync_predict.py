@@ -32,6 +32,7 @@ class VideoSyncPredictor(object):
         print('REALS', self.real_files[:5], self.real_files.shape)
 
         self.filenames = all_filenames
+        # self.filenames = ['d27c1c217aae3e70.mp4']
         # self.filenames = self.swap_fakes[:3]
 
         self.face_log = []
