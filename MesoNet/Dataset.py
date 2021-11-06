@@ -82,7 +82,8 @@ class Dataset(object):
         if tag is None:
             tag = self.make_date_stamp()
 
-        face_path = '../stats/face-predictions-211022-1416.csv'
+        # face_path = '../stats/face-predictions-211022-1416.csv'
+        face_path = '../stats/face-predictions-211106-0109.csv'
         labels_path = '../stats/all-labels.csv'
         face_df = pd.read_csv(face_path)
         labels_df = pd.read_csv(labels_path)
