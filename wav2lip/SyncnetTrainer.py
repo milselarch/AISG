@@ -2,11 +2,15 @@ try:
     import ParentImport
 
     from SyncDataset import SyncDataset
+    from models import SyncNet_color as SyncNet
+    from hparams import hparams
 
 except ModuleNotFoundError:
     from . import ParentImport
 
     from .SyncDataset import SyncDataset
+    from .models import SyncNet_color as SyncNet
+    from .hparams import hparams
 
 try:
     # need it for tensorboard
@@ -24,20 +28,22 @@ import time
 import cv2
 import os
 
-from models import SyncNet_color as SyncNet
-from hparams import hparams
-
 from tqdm.auto import tqdm
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from datetime import datetime as Datetime
+from torch.multiprocessing import set_start_method
 
 torch.cuda.empty_cache()
 
 def round_sig(x, sig=2):
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
 
+try:
+    set_start_method('spawn')
+except RuntimeError:
+    pass
 
 class SyncnetTrainer(object):
     def __init__(
@@ -248,8 +254,8 @@ class SyncnetTrainer(object):
             img_batch = [img_batch[0], img_batch[0]]
             mel_batch = [mel_batch[0], mel_batch[0]]
 
-        torch_img_batch = torch.cat(img_batch)
-        torch_mel_batch = torch.cat(mel_batch)
+        torch_img_batch = torch.cat(img_batch).to(self.device)
+        torch_mel_batch = torch.cat(mel_batch).to(self.device)
         predictions = self.model.predict(
             torch_mel_batch, torch_img_batch
         )

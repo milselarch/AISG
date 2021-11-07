@@ -2,22 +2,29 @@ import time
 
 try:
     import ParentImport
+    import audio
+
+    from hparams import hparams, get_image_list
+    from ManagerCache import Cache, TrainTypes
+    from models import SyncNet_color as SyncNet
 
     from FaceAnalysis import FaceCluster
 
 except ModuleNotFoundError:
     from . import ParentImport
+    from . import audio
+
+    from .hparams import hparams, get_image_list
+    from .ManagerCache import Cache, TrainTypes
+    from .models import SyncNet_color as SyncNet
 
     from ..FaceAnalysis import FaceCluster
 
-import audio
 import torch
 import os, random, cv2, argparse
 import torch.backends.cudnn as cudnn
 import pandas as pd
 import numpy as np
-
-from ManagerCache import Cache, TrainTypes
 
 from tqdm import tqdm
 from torch import nn
@@ -25,9 +32,7 @@ from torch import optim
 from glob import glob
 from PIL import Image, ImageOps
 from torchvision import transforms
-from hparams import hparams, get_image_list
 from torch.utils import data as data_utils
-from models import SyncNet_color as SyncNet
 from sklearn.model_selection import train_test_split
 from os.path import dirname, join, basename, isfile
 from multiprocessing import Process, Manager, Queue
@@ -80,8 +85,8 @@ class SyncDataset(object):
         self.fps_cache = {}
         self.frames_cache = {}
 
-        self.manager = Manager()
-        self.cache = Cache(self.manager)
+        self.manager = None
+        self.cache = None
         self.train_fake_audio_queue = Queue()
         self.test_fake_audio_queue = Queue()
         self.kill = False
@@ -226,6 +231,9 @@ class SyncDataset(object):
         )
 
     def start_processes(self):
+        self.manager = Manager()
+        self.cache = Cache(self.manager)
+
         for k in range(self.num_audio_workers):
             audio_process = Process(target=self.build_fake_audios)
             self.audio_processes.append(audio_process)
