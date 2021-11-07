@@ -22,12 +22,12 @@ class FaceImageMap(object):
 
     def get_detected_frames(self, face_no):
         face_frames = self.get_face_frames(face_no)
-        face_samples = []
+        face_samples = {}
 
         for frame_no in face_frames:
             face_image = face_frames[frame_no]
             if face_image.detected:
-                face_samples.append(face_image)
+                face_samples[frame_no] = face_image
 
         return face_samples
 

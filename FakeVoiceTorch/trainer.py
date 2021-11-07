@@ -438,7 +438,32 @@ class Trainer(BaseTrainer):
 
         return score
 
-    def batch_predict(self, batch_x, to_numpy=True):
+    def predict_raw(self, *args, **kwargs):
+        return self.predict_raw_audio(*args, **kwargs)
+
+    @staticmethod
+    def load_melspectrogram(audio_arr):
+        return utils.load_melspectrogram(
+            audio_arr, is_raw_audio=True
+        )
+
+    def predict_raw_audio(self, audio_arr, to_numpy=True):
+        mel_spec_array = self.load_melspectrogram(audio_arr)
+        batch_x = np.array([mel_spec_array])
+        batch_x = self.reshape_batch(batch_x)
+        torch_batch_x = torch.tensor(batch_x).to(self.device)
+
+        self.model.eval()
+        preds = self.model(torch_batch_x)
+
+        if to_numpy:
+            preds = preds.detach().cpu().numpy()
+
+        return preds
+
+    def batch_predict(
+        self, batch_x, to_numpy=True, parallel_load=True
+    ):
         if type(batch_x) is str:
             batch_x = [batch_x]
 
@@ -446,7 +471,8 @@ class Trainer(BaseTrainer):
             assert type(batch_x[0]) is str
             labels = [1] * len(batch_x)
             batch_x, np_labels = self.load_batch(
-                batch_x, labels, cache=False
+                batch_x, labels, cache=False,
+                use_parallel=parallel_load
             )
 
         if type(batch_x) is np.ndarray:
@@ -501,9 +527,17 @@ class Trainer(BaseTrainer):
         assert type(np_labels) is np.ndarray
         return batch_x, np_labels
 
+    @staticmethod
+    def reshape_batch(data_batch):
+        assert data_batch.shape[2] == utils.hparams.num_mels
+        batch_x = data_batch.reshape((
+            len(data_batch), -1, utils.hparams.num_mels, 1
+        ))
+        return batch_x
+
     def load_batch(
         self, batch_filepaths, batch_labels, target_lengths=None,
-        cache=True
+        cache=True, use_parallel=True
     ):
         if cache is True:
             cache = self.cache
@@ -511,8 +545,9 @@ class Trainer(BaseTrainer):
             cache = {}
 
         process_batch = utils.preprocess_from_filenames(
-            batch_filepaths, '', batch_labels, use_parallel=True,
-            num_cores=4, show_pbar=False, cache=cache,
+            batch_filepaths, '', batch_labels,
+            use_parallel=use_parallel, num_cores=4,
+            show_pbar=False, cache=cache,
             cache_threshold=self.cache_threshold,
             normalize=self.normalize_audio
         )
@@ -543,10 +578,7 @@ class Trainer(BaseTrainer):
             data_batch.append(clip_episode)
 
         data_batch = np.array(data_batch)
-        assert data_batch.shape[2] == utils.hparams.num_mels
-        batch_x = data_batch.reshape((
-            len(data_batch), -1, utils.hparams.num_mels, 1
-        ))
+        batch_x = self.reshape_batch(data_batch)
 
         np_labels = np.array([
             np.ones((min_length, 1)) * label

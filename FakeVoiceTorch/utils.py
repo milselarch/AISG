@@ -798,8 +798,12 @@ def preprocess_and_save_audio_from_ray_parallel(
 def process(*args, **kwargs):
     return process_audio_files_inference(*args, **kwargs)
 
-def load_melspectrogram(path):
-    audio_array, sample_rate = librosa.load(path, sr=16000)
+def load_melspectrogram(path, is_raw_audio=False):
+    if is_raw_audio:
+        audio_array = path
+    else:
+        audio_array, sample_rate = librosa.load(path, sr=16000)
+
     trim_audio_array, index = librosa.effects.trim(audio_array)
     mel_spec_array = melspectrogram(
         trim_audio_array, hparams=hparams
