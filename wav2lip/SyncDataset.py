@@ -95,31 +95,31 @@ class SyncDataset(object):
             self.start_data_loaders()
             self.loaded = True
 
-    def start_data_loaders(self):
+    def start_data_loaders(self, pin_memory=True):
         train_real_data = RealDataset(file_map=self.train_face_files)
         self.train_real_dataset = data_utils.DataLoader(
-            train_real_data,
+            train_real_data, batch_size=None,
             num_workers=self.train_workers // 2,
-            batch_size=None
+            pin_memory=pin_memory
         )
         train_fake_data = FakeDataset(file_map=self.train_face_files)
         self.train_fake_dataset = data_utils.DataLoader(
-            train_fake_data,
+            train_fake_data, batch_size=None,
             num_workers=self.train_workers // 2,
-            batch_size=None
+            pin_memory=pin_memory
         )
 
         test_real_data = RealDataset(file_map=self.test_face_files)
         self.test_real_dataset = data_utils.DataLoader(
-            test_real_data,
+            test_real_data, batch_size=None,
             num_workers=self.test_workers // 2,
-            batch_size=None
+            pin_memory=pin_memory
         )
         test_fake_data = FakeDataset(file_map=self.test_face_files)
         self.test_fake_dataset = data_utils.DataLoader(
-            test_fake_data,
+            test_fake_data, batch_size=None,
             num_workers=self.test_workers // 2,
-            batch_size=None
+            pin_memory=pin_memory
         )
 
     def load_datasets(self):

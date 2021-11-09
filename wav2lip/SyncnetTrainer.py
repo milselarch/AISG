@@ -12,12 +12,6 @@ except ModuleNotFoundError:
     from .models import SyncNet_color as SyncNet
     from .hparams import hparams
 
-try:
-    # need it for tensorboard
-    import tensorflow as tf
-except ImportError:
-    print('WARNING: NO TENSORFLOW FOUND')
-
 import torch
 import torch.nn as nn
 import numpy as np
@@ -29,14 +23,17 @@ import math
 import cv2
 import os
 
+print('IMPORT', time.time())
+
 from tqdm.auto import tqdm
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from datetime import datetime as Datetime
 from torch.multiprocessing import set_start_method
+from torch.utils.tensorboard import SummaryWriter
 
-torch.cuda.empty_cache()
+# torch.cuda.empty_cache()
 
 def round_sig(x, sig=2):
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
@@ -453,8 +450,8 @@ class SyncnetTrainer(object):
         log_dir = f'saves/logs/SYN-{self.date_stamp}'
         train_path = log_dir + '/training'
         valid_path = log_dir + '/validation'
-        self.tfile_writer = tf.summary.create_file_writer(train_path)
-        self.vfile_writer = tf.summary.create_file_writer(valid_path)
+        self.tfile_writer = SummaryWriter(train_path)
+        self.vfile_writer = SummaryWriter(valid_path)
         self.tensorboard_started = True
 
     @staticmethod
@@ -497,13 +494,12 @@ class SyncnetTrainer(object):
         assert self.tensorboard_started
         score = 2 * accuracy - 1
 
-        with file_writer.as_default():
-            tf.summary.scalar('loss', data=loss, step=step)
-            tf.summary.scalar('mean_error', data=me, step=step)
-            tf.summary.scalar('accuracy', data=accuracy, step=step)
-            tf.summary.scalar('score', data=score, step=step)
-            tf.summary.scalar(
-                'mean_squared_error', data=mse, step=step
-            )
+        file_writer.add_scalar('loss', loss, global_step=step)
+        file_writer.add_scalar('mean_error', me, global_step=step)
+        file_writer.add_scalar('accuracy', accuracy, global_step=step)
+        file_writer.add_scalar('score', score, global_step=step)
+        file_writer.add_scalar(
+            'mean_squared_error', mse, global_step=step
+        )
 
-            file_writer.flush()
+        file_writer.flush()
