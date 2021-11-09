@@ -25,6 +25,7 @@ import torchvision
 import torch.optim as optim
 import argparse
 import time
+import math
 import cv2
 import os
 
@@ -40,6 +41,7 @@ torch.cuda.empty_cache()
 def round_sig(x, sig=2):
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
 
+
 try:
     set_start_method('spawn')
 except RuntimeError:
@@ -50,7 +52,8 @@ class SyncnetTrainer(object):
         self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01,
         preload_path=None, is_checkpoint=True, syncnet_T=5,
-        strict=True
+        strict=True, train_workers=0, test_workers=0,
+        pred_fcc=1.0
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -75,7 +78,9 @@ class SyncnetTrainer(object):
         torch.backends.cudnn.benchmark = True
         self.use_cuda = use_cuda
 
-        self.model = SyncNet(self.syncnet_T)
+        self.model = SyncNet(
+            self.syncnet_T, pred_fcc=pred_fcc
+        )
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -97,7 +102,10 @@ class SyncnetTrainer(object):
         )
 
         self.load_dataset = load_dataset
-        self.dataset = SyncDataset(seed=seed, load=load_dataset)
+        self.dataset = SyncDataset(
+            seed=seed, load=load_dataset,
+            train_workers=train_workers, test_workers=test_workers
+        )
         
         if preload_path is not None:
             if is_checkpoint:
@@ -129,18 +137,18 @@ class SyncnetTrainer(object):
 
         self.model.train()
 
-        torch_batch = self.dataset.prepare_batch(
+        batch = self.dataset.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
             is_training=True, randomize=True
         )
 
-        # torch_batch = self.dataset.torch_batch(*batch)
+        torch_batch = self.dataset.torchify_batch(*batch)
         t_labels, t_images, t_mels = torch_batch
 
         t_mels = t_mels.to(self.device)
         t_images = t_images.to(self.device)
         t_labels = t_labels.to(self.device).detach()
-        print('INPUTS', t_mels.shape, t_images.shape)
+        # print('INPUTS', t_mels.shape, t_images.shape)
         preds = self.model.predict(t_mels, t_images)
 
         self.optimizer.zero_grad()
@@ -172,7 +180,7 @@ class SyncnetTrainer(object):
             is_training=False, randomize=True
         )
 
-        torch_batch = self.dataset.torch_batch(*batch)
+        torch_batch = self.dataset.torchify_batch(*batch)
         t_labels, t_images, t_mels = torch_batch
 
         t_mels = t_mels.to(self.device)
@@ -182,11 +190,13 @@ class SyncnetTrainer(object):
         # self.optimizer.zero_grad()
         if enter_eval_mode:
             self.model.train(False)
+        else:
+            self.model.train(True)
 
-        with torch.no_grad():
-            preds = self.model.predict(t_mels, t_images)
-            loss = self.criterion(preds, t_labels)
-            loss_value = loss.item()
+        # with torch.no_grad():
+        preds = self.model.predict(t_mels, t_images)
+        loss = self.criterion(preds, t_labels)
+        loss_value = loss.item()
 
         self.model.train(True)
         np_preds = preds.detach().cpu().numpy().flatten()

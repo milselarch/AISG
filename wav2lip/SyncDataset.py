@@ -25,6 +25,10 @@ import torch.backends.cudnn as cudnn
 import pandas as pd
 import numpy as np
 
+from BaseDataset import BaseDataset
+from RealDataset import RealDataset
+from FakeDataset import FakeDataset
+
 from tqdm import tqdm
 from torch import nn
 from torch import optim
@@ -44,20 +48,16 @@ def kwargify(**kwargs):
 class SyncDataset(object):
     def __init__(
         self, seed=32, train_size=0.95, load=True,
-        mel_step_size=16
+        mel_step_size=16, syncnet_T=5, train_workers=0,
+        test_workers=0
     ):
-        self.mel_step_size = mel_step_size
-        self.syncnet_mel_step_size = 16
-        self.syncnet_T = 1
+        assert train_workers % 2 == 0
+        assert test_workers % 2 == 0
 
-        self.sample_framerate = 10
-        self.max_cache_size = 1000
-        self.min_samples = 200
-
-        self.num_audio_workers = 2
-        self.num_build_workers = 2
-        self.audio_processes = []
-        self.build_processes = []
+        self.syncnet_T = syncnet_T
+        self.syncnet_mel_step_size = mel_step_size
+        self.train_workers = train_workers
+        self.test_workers = test_workers
 
         self.transform = transforms.Compose([
             transforms.Resize((256, 256)),
@@ -74,25 +74,53 @@ class SyncDataset(object):
         self.video_base_dir = '../datasets/train/videos'
         self.audio_base_dir = '../datasets-local/audios-flac'
 
-        self.face_files = None
-        self.train_face_files = None
-        self.test_face_files = None
-
         self.train_size = train_size
         self.seed = seed
 
         self.fps_cache = {}
         self.frames_cache = {}
 
-        self.manager = None
-        self.cache = None
-        self.train_fake_audio_queue = Queue()
-        self.test_fake_audio_queue = Queue()
-        self.kill = False
+        self.face_files = None
+        self.train_face_files = None
+        self.test_face_files = None
+
+        self.train_real_dataset = None
+        self.train_fake_dataset = None
+        self.test_real_dataset = None
+        self.test_fake_dataset = None
+        self.loaded = False
 
         if load:
             self.load_datasets()
-            # self.start_processes()
+            self.start_data_loaders()
+            self.loaded = True
+
+    def start_data_loaders(self):
+        train_real_data = RealDataset(file_map=self.train_face_files)
+        self.train_real_dataset = data_utils.DataLoader(
+            train_real_data,
+            num_workers=self.train_workers // 2,
+            batch_size=None
+        )
+        train_fake_data = FakeDataset(file_map=self.train_face_files)
+        self.train_fake_dataset = data_utils.DataLoader(
+            train_fake_data,
+            num_workers=self.train_workers // 2,
+            batch_size=None
+        )
+
+        test_real_data = RealDataset(file_map=self.test_face_files)
+        self.test_real_dataset = data_utils.DataLoader(
+            test_real_data,
+            num_workers=self.test_workers // 2,
+            batch_size=None
+        )
+        test_fake_data = FakeDataset(file_map=self.test_face_files)
+        self.test_fake_dataset = data_utils.DataLoader(
+            test_fake_data,
+            num_workers=self.test_workers // 2,
+            batch_size=None
+        )
 
     def load_datasets(self):
         face_cluster = FaceCluster(load_datasets=False)
@@ -108,67 +136,15 @@ class SyncDataset(object):
         self.test_face_files = {}
 
         file_column = detections['filename'].to_numpy()
-        face_column = detections['face'].to_numpy()
-        frame_column = detections['frame'].to_numpy()
-        talker_column = detections['talker'].to_numpy()
-        num_faces_column = detections['num_faces'].to_numpy()
-        file_map = {}
-
-        for k in tqdm(range(len(file_column))):
-            filename = file_column[k]
-            is_fake = labels_map[filename]
-            is_talker = talker_column[k]
-            num_faces = num_faces_column[k]
-
-            if is_fake:
-                continue
-            elif not is_talker and (num_faces > 1):
-                continue
-
-            if filename not in file_map:
-                file_map[filename] = []
-
-            frames = file_map[filename]
-            frames.append({
-                'face': face_column[k],
-                'frame': frame_column[k],
-                'talker': is_talker,
-                'num_faces': num_faces
-            })
-
-        for filename in tqdm(face_map):
-            if filename not in file_map:
-                continue
-
-            # face_fake = face_map[filename]
-            frames = file_map[filename]
-            self.face_files[filename] = []
-
-            for k in range(len(frames)):
-                frame_no = frames[k]['frame']
-                # is_talker = frames[k]['talker']
-                face_no = frames[k]['face']
-
-                name = filename[:filename.index('.')]
-                img_file = f'{name}/{face_no}-{frame_no}.jpg'
-                img_path = f'{self.face_base_dir}/{img_file}'
-                self.face_files[filename].append(img_path)
-
-        all_filenames = list(self.face_files.keys())
-        x_train, x_test, y_train, y_test = train_test_split(
-            all_filenames, all_filenames,
-            random_state=self.seed, train_size=self.train_size
+        unique_filenames = np.unique(file_column)
+        train_files, test_files, _, _ = train_test_split(
+            unique_filenames, unique_filenames,
+            random_state=self.seed
         )
 
-        self.train_face_files = {}
-        self.test_face_files = {}
-
-        for filename in all_filenames:
-            video_face_files = self.face_files[filename]
-            if filename in x_train:
-                self.train_face_files[filename] = video_face_files
-            else:
-                self.test_face_files[filename] = video_face_files
+        self.face_files = unique_filenames
+        self.train_face_files = train_files
+        self.test_face_files = test_files
 
     def prepare_batch(
         self, batch_size, fake_p=0.5,
@@ -177,10 +153,10 @@ class SyncDataset(object):
         fake_count = int(batch_size * fake_p)
         real_count = batch_size - fake_count
 
-        real_images, real_mels = self.safe_load_samples(
+        real_images, real_mels = self.load_samples(
             0, real_count, is_training=is_training
         )
-        fake_images, fake_mels = self.safe_load_samples(
+        fake_images, fake_mels = self.load_samples(
             1, fake_count, is_training=is_training
         )
 
@@ -189,63 +165,46 @@ class SyncDataset(object):
         labels = [0] * real_count + [1] * fake_count
         return labels, images, mels
 
+    def load_samples(self, label, num_samples, is_training=True):
+        mel_samples, img_samples = [], []
+
+        for k in range(num_samples):
+            sample = self.load_sample(label, is_training=is_training)
+            torch_img, torch_mel = sample
+            img_samples.append(torch_img)
+            mel_samples.append(torch_mel)
+
+        return img_samples, mel_samples
+
+    def load_sample(self, label, is_training=True):
+        assert label in (0, 1)
+        assert type(is_training) is bool
+        assert self.loaded
+
+        if is_training:
+            if label == 0:
+                dataset = self.train_real_dataset
+            else:
+                dataset = self.train_fake_dataset
+        else:
+            if label == 0:
+                dataset = self.test_real_dataset
+            else:
+                dataset = self.test_fake_dataset
+
+        assert dataset is not None
+
+        for sample in dataset:
+            assert sample is not None
+            torch_img, torch_mel = sample
+            return torch_img, torch_mel
+
     @staticmethod
     def torchify_batch(labels, images, mels):
-        torch_images = torch.cat(images)
-        torch_images = torch.unsqueeze(torch_images, 0)
-        """
-        torch_images = torch.cat([
-            torch.unsqueeze(image, 0) for image in images
-        ])
-        torch_mels = torch.cat([
-            torch.unsqueeze(torch.FloatTensor(mel), 0)
-            for mel in mels
-        ])
-        """
-        print('NN', mels[0].shape, mels[0].T.shape)
-        print([mel.T.shape for mel in mels])
-
-        torch_mels = torch.cat([
-            torch.unsqueeze(torch.FloatTensor(mel.T), 0)
-            for mel in mels
-        ])
-        torch_mels = torch.unsqueeze(torch_mels, -1)
-        torch_mels = torch_mels.permute(0, 3, 1, 2)
-
+        torch_mels = torch.cat(mels, dim=0)
+        torch_images = torch.cat(images, dim=0)
         torch_labels = torch.FloatTensor(labels)
         return torch_labels, torch_images, torch_mels
-
-    def safe_load_samples(self, label, num_samples, is_training=True):
-        assert label in (0, 1)
-
-        turns = 0
-        while self.cache.min_samples < self.min_samples:
-            sizes = self.get_sample_sizes()
-            print(f'WAITING [{turns}] {sizes}')
-            time.sleep(1)
-            turns += 1
-
-        return self.cache.pop_samples(
-            label, num_samples, is_training=is_training
-        )
-
-    def start_processes_v1(self):
-        for k in range(self.num_audio_workers):
-            audio_process = Process(target=self.build_fake_audios)
-            self.audio_processes.append(audio_process)
-            audio_process.daemon = True
-            audio_process.start()
-
-        for k in range(self.num_build_workers):
-            build_process = Process(target=self.build_sample_loop)
-            self.build_processes.append(build_process)
-            build_process.daemon = True
-            build_process.start()
-
-    @staticmethod
-    def m_print(cond, *args, **kwargs):
-        if cond:
-            print(*args, **kwargs)
 
     @staticmethod
     def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
@@ -394,43 +353,6 @@ class SyncDataset(object):
         orig_mel = audio.melspectrogram(wav).T
         return orig_mel
 
-    def load_real_samples(
-        self, filename=None, is_training=True
-    ):
-        if is_training:
-            file_map = self.train_face_files
-            train_type = TrainTypes.TRAIN_REAL
-        else:
-            file_map = self.test_face_files
-            train_type = TrainTypes.TEST_REAL
-
-        if filename is None:
-            filename = random.choice(list(
-                file_map.keys()
-            ))
-
-        image_paths = file_map[filename]
-        image_paths = self.filter_image_paths(image_paths)
-        fps = self.resolve_fps(filename)
-        orig_mel = self.load_audio(filename)
-
-        for image_path in image_paths:
-            frame_no = self.get_frame_no(image_path)
-            frame_key = (filename, frame_no)
-
-            window_fnames = self.get_window(image_path)
-            if window_fnames is None:
-                continue
-
-            torch_imgs = self.batch_image_window(window_fnames)
-            torch_mels = self.load_mel_batch(orig_mel, fps, frame_no)
-            if self.is_incomplete_mel(torch_mels):
-                continue
-
-            self.cache.add(
-                train_type, frame_key, torch_imgs, torch_mels
-            )
-
     @staticmethod
     def filter_image_paths(image_paths):
         filtered_paths = []
@@ -439,72 +361,6 @@ class SyncDataset(object):
                 filtered_paths.append(image_path)
 
         return filtered_paths
-
-    def load_fake_samples(
-        self, filename=None, is_training=True
-    ):
-        if is_training:
-            file_map = self.train_face_files
-            train_type = TrainTypes.TRAIN_FAKE
-        else:
-            file_map = self.test_face_files
-            train_type = TrainTypes.TEST_FAKE
-
-        if filename is None:
-            filenames = list(file_map.keys())
-            filename = random.choice(filenames)
-
-        image_paths = file_map[filename]
-        image_paths = self.filter_image_paths(image_paths)
-        num_frames = self.resolve_frames(filename)
-        num_samples = int(num_frames / self.sample_framerate)
-        num_samples = min(len(image_paths), num_samples)
-        sample_paths = random.sample(image_paths, k=num_samples)
-
-        for image_path in sample_paths:
-            frame_no = self.get_frame_no(image_path)
-            frame_key = (filename, frame_no)
-
-            window_fnames = self.get_window(image_path)
-            if window_fnames is None:
-                continue
-
-            image_window = self.batch_image_window(window_fnames)
-            # image = self.pil_loader(image_path)
-            # image = self.transform(image)
-            # bottom_img = image[:, image.shape[1]//2:]
-
-            mel = self.cache.safe_pop_fake_mel(is_training)
-            self.cache.add(train_type, frame_key, image_window, mel)
-
-    def build_sample_loop(self):
-        while not self.kill:
-            self.build_samples()
-
-    def build_samples(self):
-        T = TrainTypes
-
-        if self.cache.get_size(T.TRAIN_REAL) < self.max_cache_size:
-            # print('LOAD REAL-TRAIN')
-            self.load_real_samples(is_training=True)
-        if self.cache.get_size(T.TEST_REAL) < self.max_cache_size:
-            # print('LOAD REAL-TEST')
-            self.load_real_samples(is_training=False)
-
-        if self.cache.get_size(T.TRAIN_FAKE) < self.max_cache_size:
-            # print('LOAD FAKE-TRAIN')
-            self.load_fake_samples(is_training=True)
-        if self.cache.get_size(T.TEST_FAKE) < self.max_cache_size:
-            # print('LOAD FAKE-TRAIN')
-            self.load_fake_samples(is_training=False)
-
-    def get_sample_sizes(self):
-        return (
-            self.cache.get_size(TrainTypes.TRAIN_REAL),
-            self.cache.get_size(TrainTypes.TRAIN_FAKE),
-            self.cache.get_size(TrainTypes.TEST_REAL),
-            self.cache.get_size(TrainTypes.TEST_FAKE)
-        )
 
     @staticmethod
     def get_frame_no(filename):
