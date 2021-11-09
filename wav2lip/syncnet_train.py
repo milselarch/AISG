@@ -1,8 +1,8 @@
 import torch.multiprocessing as mp
 
-from SyncnetTrainer import SyncnetTrainer
-
 if __name__ == '__main__':
+    from SyncnetTrainer import SyncnetTrainer
+
     mp.freeze_support()
 
     trainer = SyncnetTrainer(

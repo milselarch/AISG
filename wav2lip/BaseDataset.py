@@ -11,20 +11,27 @@ except ModuleNotFoundError:
     from ..FaceAnalysis import FaceCluster
 
 import os
+import sys
 import audio
 import random
 import pandas as pd
 import numpy as np
 import torch
+import time
 import cv2
 
 from tqdm.auto import tqdm
 from hparams import hparams
 from torch.utils.data import IterableDataset
+from torch.multiprocessing import set_start_method
+from datetime import datetime as Datetime
 
-class BaseDataset(IterableDataset, ABC):
-    __ID = 0
+try:
+    set_start_method('spawn')
+except RuntimeError:
+    pass
 
+class BaseDataset(object):
     def __init__(
         self, file_map, syncnet_T=5, syncnet_mel_step_size=16,
         face_base_dir='../datasets/extract/mtcnn-wav2lip',
@@ -34,13 +41,13 @@ class BaseDataset(IterableDataset, ABC):
         face_path='../stats/all-labels.csv',
         labels_path='../datasets/train.csv',
         detect_path='../stats/mtcnn/labelled-mtcnn.csv',
-        log_on_load=False
+        log_on_load=False, length=sys.maxsize
     ):
         super(BaseDataset).__init__()
 
-        self.ID = self.__ID
-        self.__class__.__ID += 1
+        self.ID = self.make_date_stamp()
 
+        self.length = length
         self.syncnet_T = syncnet_T
         self.syncnet_mel_step_size = syncnet_mel_step_size
         self.fps_cache = {}
@@ -62,6 +69,13 @@ class BaseDataset(IterableDataset, ABC):
 
         assert type(file_map) is dict
         self.file_map = file_map
+
+    def __len__(self):
+        return self.length
+
+    @staticmethod
+    def make_date_stamp():
+        return Datetime.now().strftime("%y%m%d-%H%M%S")
 
     def load_talker_face_map(self):
         face_cluster = FaceCluster(load_datasets=False)
