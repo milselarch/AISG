@@ -4,7 +4,6 @@ try:
     import ParentImport
 
     from FaceAnalysis import FaceCluster
-
 except ModuleNotFoundError:
     from . import ParentImport
 
@@ -88,7 +87,7 @@ class SyncDataset(object):
 
         if load:
             self.load_datasets()
-            self.start_processes()
+            # self.start_processes()
 
     def load_datasets(self):
         face_cluster = FaceCluster(load_datasets=False)
@@ -225,7 +224,7 @@ class SyncDataset(object):
             label, num_samples, is_training=is_training
         )
 
-    def start_processes(self):
+    def start_processes_v1(self):
         for k in range(self.num_audio_workers):
             audio_process = Process(target=self.build_fake_audios)
             self.audio_processes.append(audio_process)
@@ -263,7 +262,7 @@ class SyncDataset(object):
         verbose=False
     ):
         if type(img) is str:
-            img = cv2.imread(path)
+            img = cv2.imread(img)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if size is None:
@@ -306,18 +305,6 @@ class SyncDataset(object):
             batch_x = torch.unsqueeze(batch_x, 0)
 
         return batch_x
-
-    def load_mel_batch(
-        self, orig_mel, fps, frame_no, transpose=False
-    ):
-        orig_mel = orig_mel.T if transpose else orig_mel
-        mel = self.crop_audio_by_frame(
-            orig_mel, frame_no=frame_no, fps=fps
-        )
-
-        torch_batch_x = torch.FloatTensor(mel.T)
-        torch_batch_x = torch_batch_x.unsqueeze(0).unsqueeze(0)
-        return torch_batch_x
 
     def resolve_fps(self, filename):
         if filename not in self.fps_cache:
@@ -370,13 +357,17 @@ class SyncDataset(object):
 
         num_frames = len(orig_mel) * fps / 80.0
         max_start_index = len(orig_mel) - self.syncnet_mel_step_size
+        # print('O-MEL SHAPE', orig_mel.shape)
+
         assert max_start_index > 0
         num_samples = int(num_frames / self.sample_framerate)
         indexes = random.sample(range(max_start_index), k=num_samples)
-        t_mel = orig_mel.T
 
         for start_index in indexes:
-            torch_mels = self.load_mel_batch(t_mel, fps, start_index)
+            sub_mel = self.crop_audio_by_index(orig_mel, start_index)
+            torch_mels = torch.FloatTensor(sub_mel.T)
+            torch_mels = torch_mels.unsqueeze(0).unsqueeze(0)
+            # print('MEL-LEN', torch_mels.shape)
             assert not self.is_incomplete_mel(torch_mels)
 
             if is_training:
@@ -416,7 +407,7 @@ class SyncDataset(object):
         image_paths = file_map[filename]
         image_paths = self.filter_image_paths(image_paths)
         fps = self.resolve_fps(filename)
-        orig_mel = self.load_audio(filename).T
+        orig_mel = self.load_audio(filename)
 
         for image_path in image_paths:
             frame_no = self.get_frame_no(image_path)
@@ -460,14 +451,10 @@ class SyncDataset(object):
 
         image_paths = file_map[filename]
         image_paths = self.filter_image_paths(image_paths)
-
         num_frames = self.resolve_frames(filename)
-        num_samples = int(num_frames / sample_framerate)
+        num_samples = int(num_frames / self.sample_framerate)
         num_samples = min(len(image_paths), num_samples)
-
-        sample_paths = random.sample(
-            image_paths, k=num_samples
-        )
+        sample_paths = random.sample(image_paths, k=num_samples)
 
         for image_path in sample_paths:
             frame_no = self.get_frame_no(image_path)
@@ -544,7 +531,7 @@ class SyncDataset(object):
         return window_fnames
 
     @staticmethod
-    def batch_image_window_v1(window_fnames, mirror_prob=0.5):
+    def batch_image_window(window_fnames, mirror_prob=0.5):
         # need to implement flipping
         size = hparams.size
         image_window = []
@@ -591,9 +578,24 @@ class SyncDataset(object):
 
         return False
 
+    def load_mel_batch(
+        self, orig_mel, fps, frame_no, transpose=False
+    ):
+        orig_mel = orig_mel.T if transpose else orig_mel
+        mel = self.crop_audio_by_frame(
+            orig_mel, frame_no=frame_no, fps=fps
+        )
+
+        torch_batch_x = torch.FloatTensor(mel.T)
+        torch_batch_x = torch_batch_x.unsqueeze(0).unsqueeze(0)
+        return torch_batch_x
+
     def crop_audio_by_frame(self, spec, frame_no, fps):
         # num_frames = (T x hop_size * fps) / sample_rate
         start_idx = int(80. * (frame_no / float(fps)))
+        return self.crop_audio_by_index(spec, start_idx)
+
+    def crop_audio_by_index(self, spec, start_idx):
         end_idx = start_idx + self.syncnet_mel_step_size
         return spec[start_idx: end_idx, :]
 

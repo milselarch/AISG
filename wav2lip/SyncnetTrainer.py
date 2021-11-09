@@ -123,12 +123,12 @@ class SyncnetTrainer(object):
 
         self.model.train()
 
-        batch = self.dataset.prepare_batch(
+        torch_batch = self.dataset.prepare_batch(
             batch_size=batch_size, fake_p=fake_p,
             is_training=True, randomize=True
         )
 
-        torch_batch = self.dataset.torch_batch(*batch)
+        # torch_batch = self.dataset.torch_batch(*batch)
         t_labels, t_images, t_mels = torch_batch
 
         t_mels = t_mels.to(self.device)
