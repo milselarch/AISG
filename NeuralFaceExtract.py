@@ -1,11 +1,16 @@
 try:
     import datasets
+    import loader_v2 as loader
+
+    from FaceImageMap import FaceImageMap
     from DeepfakeDetection.FaceExtractor import FaceExtractor
 except ModuleNotFoundError:
     from . import datasets
+    from . import loader_v2 as loader
+
+    from .FaceImageMap import FaceImageMap
     from .DeepfakeDetection.FaceExtractor import FaceExtractor
 
-import loader_v2 as loader
 import torch
 import numpy as np
 import pandas as pd
@@ -17,7 +22,6 @@ import gc
 
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from torch.utils.data import DataLoader
-from FaceImageMap import FaceImageMap
 from PIL import Image, ImageDraw
 from datetime import datetime
 from tqdm.auto import tqdm
@@ -205,6 +209,58 @@ class NeuralFaceExtract(object):
             face_crop_map
         )
 
+    def process_filepath(
+        self, filepath, every_n_frames=20, batch_size=16,
+        base_dir=None, export_size=256, skip_detect=None,
+        ignore_detect=None, pbar=None
+    ):
+        name = os.path.basename(filepath)
+        if pbar is not None:
+            pbar.set_description(name)
+
+        if base_dir is not None:
+            filepath = f'{base_dir}/{filepath}'
+
+        video_cap = cv2.VideoCapture(filepath)
+        width_in = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height_in = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        scale = 0.5
+        if min(width_in, height_in) < 700:
+            scale = 1
+
+        vid_obj = loader.load_video(
+            video_cap, every_n_frames=every_n_frames,
+            scale=scale, reset_index=False
+        )
+
+        if vid_obj is None:
+            return None
+
+        # vid_obj = vid_obj.auto_resize()
+        vid_obj.auto_resize_inplace()
+        vid_obj.force_no_resize()
+
+        print(f'{filepath} SCALE {scale}')
+        # np_frames = vid_obj.out_video
+
+        face_image_map = FaceExtractor.faces_from_video(
+            vid_obj, rescale=1, filename=filepath,
+            every_n_frames=every_n_frames, coords_scale=scale,
+            export_size=export_size, skip_detect=skip_detect,
+            ignore_detect=ignore_detect,
+            fill_face_maps=functools.partial(
+                self.fill_face_maps, batch_size=batch_size,
+                export_size=export_size
+            )
+        )
+
+        face_image_map = FaceImageMap(
+            face_image_map, fps=vid_obj.fps
+        )
+
+        return face_image_map
+
     def process_filepaths(
         self, filepaths, callback=lambda *args, **kwargs: None,
         every_n_frames=20, batch_size=16, base_dir=None,
@@ -221,52 +277,11 @@ class NeuralFaceExtract(object):
         pbar = tqdm(filepaths)
 
         for filepath in pbar:
-            name = os.path.basename(filepath)
-            pbar.set_description(name)
-
-            if base_dir is not None:
-                filepath = f'{base_dir}/{filepath}'
-
-            video_cap = cv2.VideoCapture(filepath)
-            width_in = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height_in = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-            scale = 0.5
-            if min(width_in, height_in) < 700:
-                scale = 1
-
-            vid_obj = loader.load_video(
-                video_cap, every_n_frames=every_n_frames,
-                scale=scale, reset_index=False
-            )
-
-            if vid_obj is None:
-                callback(
-                    filepath=filepath, face_image_map=None,
-                    pbar=pbar
-                )
-                continue
-
-            # vid_obj = vid_obj.auto_resize()
-            vid_obj.auto_resize_inplace()
-            vid_obj.force_no_resize()
-
-            print(f'{filepath} SCALE {scale}')
-            # np_frames = vid_obj.out_video
-
-            face_image_map = FaceExtractor.faces_from_video(
-                vid_obj, rescale=1, filename=filepath,
-                every_n_frames=every_n_frames, coords_scale=scale,
-                export_size=export_size, skip_detect=skip_detect,
-                ignore_detect=ignore_detect,
-                fill_face_maps=functools.partial(
-                    self.fill_face_maps,  batch_size=batch_size,
-                    export_size=export_size
-                )
-            )
-
-            face_image_map = FaceImageMap(
-                face_image_map, fps=vid_obj.fps
+            face_image_map = self.process_filepath(
+                filepath=filepath, every_n_frames=every_n_frames,
+                base_dir=base_dir, export_size=export_size,
+                skip_detect=skip_detect, ignore_detect=ignore_detect,
+                pbar=pbar
             )
 
             callback(
