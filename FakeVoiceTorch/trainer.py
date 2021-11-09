@@ -447,19 +447,34 @@ class Trainer(BaseTrainer):
             audio_arr, is_raw_audio=True
         )
 
-    def predict_raw_audio(self, audio_arr, to_numpy=True):
+    def predict_raw_audio(
+        self, audio_arr, to_numpy=True, max_length=1024
+    ):
         mel_spec_array = self.load_melspectrogram(audio_arr)
         batch_x = np.array([mel_spec_array])
         batch_x = self.reshape_batch(batch_x)
         torch_batch_x = torch.tensor(batch_x).to(self.device)
+        # print('AUD TORCH BATCH', torch_batch_x.shape)
 
         self.model.eval()
-        preds = self.model(torch_batch_x)
+        mel_length = torch_batch_x.shape[1]
+        total_preds = []
+        index = 0
+
+        while index < mel_length:
+            sub_mel = torch_batch_x[0, index: index+max_length]
+            preds = self.model(sub_mel)
+            total_preds.append(preds)
+            # print('PREDS', preds.shape)
+            index += max_length
+
+        total_preds = torch.cat(total_preds, dim=0)
+        # print('T-PREDS SHAPE', total_preds.shape)
 
         if to_numpy:
-            preds = preds.detach().cpu().numpy()
+            total_preds = total_preds.detach().cpu().numpy()
 
-        return preds
+        return total_preds
 
     def batch_predict(
         self, batch_x, to_numpy=True, parallel_load=True
