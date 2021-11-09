@@ -535,34 +535,6 @@ class SyncDataset(object):
 
         return window_fnames
 
-    @staticmethod
-    def batch_image_window(window_fnames, mirror_prob=0.5):
-        # need to implement flipping
-        size = hparams.size
-        image_window = []
-
-        for item in window_fnames:
-            if type(item) is str:
-                img = cv2.imread(filename)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            else:
-                img = item
-
-            if img is None:
-                return False
-
-            if img.shape[0] != img.shape[1]:
-                assert img.shape[0] == img.shape[1] // 2
-                img = cv2.resize(img, (size, size // 2))
-            else:
-                img = cv2.resize(img, (size, size))
-                img = img[image.shape[0] // 2:, :]
-
-            assert img.shape[0] == img.shape[1] // 2
-            image_window.append(img)
-
-        return image_window
-
     def _get_window(self, start_frame):
         start_id = self.get_frame_id(start_frame)
         vid_name = dirname(start_frame)
