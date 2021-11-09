@@ -1,3 +1,6 @@
+from abc import ABC
+from typing import Iterator
+
 try:
     import ParentImport
 
@@ -17,18 +20,27 @@ import cv2
 
 from tqdm.auto import tqdm
 from hparams import hparams
+from torch.utils.data import IterableDataset
 
-class BaseDataset(object):
+class BaseDataset(IterableDataset, ABC):
+    __ID = 0
+
     def __init__(
         self, file_map, syncnet_T=5, syncnet_mel_step_size=16,
-        face_base_dir='../datasets-local/mtcnn-faces',
+        face_base_dir='../datasets/extract/mtcnn-wav2lip',
         video_base_dir='../datasets/train/videos',
-        audio_base_dir='../datasets-local/audios-flac',
+        audio_base_dir='../datasets/extract/audios-flac',
 
         face_path='../stats/all-labels.csv',
         labels_path='../datasets/train.csv',
-        detect_path='../stats/mtcnn/labelled-mtcnn.csv'
+        detect_path='../stats/mtcnn/labelled-mtcnn.csv',
+        log_on_load=False
     ):
+        super(BaseDataset).__init__()
+
+        self.ID = self.__ID
+        self.__class__.__ID += 1
+
         self.syncnet_T = syncnet_T
         self.syncnet_mel_step_size = syncnet_mel_step_size
         self.fps_cache = {}
@@ -41,12 +53,14 @@ class BaseDataset(object):
         self.labels_path = labels_path
         self.detect_path = detect_path
 
+        self.log_on_load = log_on_load
         self.talker_face_map = None
         self.load_talker_face_map()
 
-        if type(file_map) in (str, list):
+        if type(file_map) in (str, list, np.ndarray):
             file_map = self.load_folders(file_map)
 
+        assert type(file_map) is dict
         self.file_map = file_map
 
     def load_talker_face_map(self):
@@ -83,11 +97,14 @@ class BaseDataset(object):
             basedir = folders
             folders = os.listdir(folders)
         else:
-            basedir = None
+            basedir = self.face_base_dir
 
         file_map = {}
 
         for folder in folders:
+            if folder.endswith('.mp4'):
+                folder = folder[:folder.rindex('.')]
+
             folder_path = f'{basedir}/{folder}'
             filenames = os.listdir(folder_path)
             video_filename = f'{folder}.mp4'
@@ -129,17 +146,37 @@ class BaseDataset(object):
 
     def _load_random_video(self, randomize_images=True):
         filename = self.choose_random_filename()
+        filename = os.path.basename(filename)
+
+        if self.log_on_load:
+            print(f'LOAD VIDEO {filename}')
+
+        if not filename.endswith('.mp4'):
+            assert '.' not in filename
+            filename = f'{filename}.mp4'
+
+        name = filename[:filename.rindex('.')]
         image_paths = self.load_image_paths(
-            filename, randomize_images=randomize_images
+            name, randomize_images=randomize_images
         )
 
         orig_mel = self.load_audio(filename)
         fps = self.resolve_fps(filename)
+
+        try:
+            assert fps != 0
+        except AssertionError as e:
+            print(f'FILE LOAD FAILED', filename)
+            raise e
+
         return orig_mel, image_paths, fps
 
     def load_audio(self, filename):
         filename = os.path.basename(filename)
         name = filename
+
+        if self.log_on_load:
+            print(f'LOAD AUDIO {filename}')
 
         try:
             name = name[:name.rindex('.')]

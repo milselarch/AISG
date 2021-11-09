@@ -12,7 +12,6 @@ class RealDataset(BaseDataset):
 
     def load_random_video(self):
         orig_mel, image_paths, fps = self._load_random_video()
-        assert fps != 0
 
         self.current_fps = fps
         self.current_mel = orig_mel
@@ -21,6 +20,11 @@ class RealDataset(BaseDataset):
     def __getitem__(self, idx):
         sample = self.load_random_sample()
         return sample
+
+    def __iter__(self):
+        while True:
+            sample = self.load_random_sample()
+            yield sample
 
     def load_random_sample(self):
         sample = None

@@ -6,8 +6,13 @@ from torch.nn import functional as F
 from .conv import Conv2d
 
 class SyncNet_color(nn.Module):
-    def __init__(self, syncnet_T, num_dense_neurons=32):
+    def __init__(
+        self, syncnet_T, num_dense_neurons=32,
+        pred_fcc=0.8
+    ):
         super(SyncNet_color, self).__init__()
+
+        self.pred_fcc = pred_fcc
 
         self.face_encoder = nn.Sequential(
             Conv2d(
@@ -82,11 +87,11 @@ class SyncNet_color(nn.Module):
         similarity = cosine_similarity(audio_embed, face_embed)
         return 1.0 - similarity
 
-    def pred_fcc(self, audios, images, fcc_ratio=0.8):
+    def pred_fcc(self, audios, images, fcc_ratio=None):
+        if fcc_ratio is None:
+            fcc_ratio = self.fcc_ratio
+
         audio_embeds, image_embeds = self(audios, images)
-        cosine_similarity = nn.functional.cosine_similarity
-        similarity = cosine_similarity(audio_embeds, face_embeds)
-        cosine_fakeness = 1.0 - similarity
 
         flat_audio_embeds = torch.flatten(audio_embeds, start_dim=1)
         flat_image_embeds = torch.flatten(image_embeds, start_dim=1)
@@ -95,9 +100,15 @@ class SyncNet_color(nn.Module):
         )
 
         prediction = self.dense_layer(flat_embeds)
-        combined_pred = (
-            (1-fcc_ratio) * cosine_fakeness +
-            fcc_ratio * prediction
-        )
+        prediction = torch.sigmoid(prediction)
 
-        return combined_pred
+        if fcc_ratio > 0:
+            cosine_similarity = nn.functional.cosine_similarity
+            similarity = cosine_similarity(audio_embeds, face_embeds)
+            cosine_fakeness = 1.0 - similarity
+            prediction = (
+                (1-fcc_ratio) * cosine_fakeness +
+                fcc_ratio * prediction
+            )
+
+        return prediction
