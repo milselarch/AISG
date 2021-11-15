@@ -1,3 +1,4 @@
+import functools
 import time
 
 try:
@@ -22,9 +23,11 @@ except ModuleNotFoundError:
 import torch
 import os, random, cv2, argparse
 import torch.backends.cudnn as cudnn
+import torch.multiprocessing as mp
 import pandas as pd
 import numpy as np
 
+from BaseDataset import MelCache
 from BaseDataset import BaseDataset
 from RealDataset import RealDataset
 from FakeDataset import FakeDataset
@@ -47,7 +50,7 @@ def kwargify(**kwargs):
 
 class SyncDataset(object):
     def __init__(
-        self, seed=32, train_size=0.95, load=True,
+        self, seed=32, train_size=0.9, load=False,
         mel_step_size=16, syncnet_T=5, train_workers=0,
         test_workers=0
     ):
@@ -79,10 +82,13 @@ class SyncDataset(object):
 
         self.fps_cache = {}
         self.frames_cache = {}
+        self.mel_cache = None
 
         self.face_files = None
+        self.allowed_filenames = None
         self.train_face_files = None
         self.test_face_files = None
+        self.face_map = None
 
         self.train_real_dataset = None
         self.train_fake_dataset = None
@@ -91,38 +97,66 @@ class SyncDataset(object):
         self.loaded = False
 
         if load:
-            self.load_datasets()
-            self.start_data_loaders()
-            self.loaded = True
+            self.load()
 
-    def start_data_loaders(self, pin_memory=True):
-        train_real_data = RealDataset(file_map=self.train_face_files)
+    def start_data_loaders(self, pin_memory=True, log_on_load=True):
+        train_queue = mp.Queue()
+        for k in range(self.train_workers):
+            train_queue.put(k)
+
+        if (self.train_workers == 0) and (self.test_workers == 0):
+            self.mel_cache = MelCache()
+        else:
+            self.mel_cache = None
+
+        Real = functools.partial(
+            RealDataset, log_on_load=log_on_load,
+            queue=train_queue, face_map=self.face_map,
+            mel_cache=self.mel_cache
+        )
+        Fake = functools.partial(
+            FakeDataset, log_on_load=log_on_load,
+            face_map=self.face_map, mel_cache=self.mel_cache
+        )
+
+        train_real_data = Real(file_map=self.train_face_files)
+        print(f'TRAIN REAL LOAD', train_real_data.num_files)
         self.train_real_dataset = data_utils.DataLoader(
             train_real_data, batch_size=None,
             num_workers=self.train_workers // 2,
             pin_memory=pin_memory
         )
-        train_fake_data = FakeDataset(file_map=self.train_face_files)
+        train_fake_data = Fake(file_map=self.train_face_files)
+        print(f'TRAIN FAKE LOAD', train_fake_data.num_files)
         self.train_fake_dataset = data_utils.DataLoader(
             train_fake_data, batch_size=None,
             num_workers=self.train_workers // 2,
             pin_memory=pin_memory
         )
 
-        test_real_data = RealDataset(file_map=self.test_face_files)
+        test_real_data = Real(file_map=self.test_face_files)
+        print(f'TEST REAL LOAD', test_real_data.num_files)
         self.test_real_dataset = data_utils.DataLoader(
             test_real_data, batch_size=None,
             num_workers=self.test_workers // 2,
             pin_memory=pin_memory
         )
-        test_fake_data = FakeDataset(file_map=self.test_face_files)
+        test_fake_data = Fake(file_map=self.test_face_files)
+        print(f'TEST FAKE LOAD', test_fake_data.num_files)
         self.test_fake_dataset = data_utils.DataLoader(
             test_fake_data, batch_size=None,
             num_workers=self.test_workers // 2,
             pin_memory=pin_memory
         )
 
-    def load_datasets(self):
+    def load(self):
+        self.load_datasets()
+        self.start_data_loaders()
+        self.loaded = True
+
+    def load_datasets(
+        self, exclude_fakes=True, exclude_multiple_faces=False
+    ):
         face_cluster = FaceCluster(load_datasets=False)
         face_path = '../stats/all-labels.csv'
         face_map = face_cluster.make_face_map(face_path)
@@ -134,17 +168,69 @@ class SyncDataset(object):
         self.face_files = {}
         self.train_face_files = {}
         self.test_face_files = {}
+        self.face_map = {}
 
+        # print(detections)
         file_column = detections['filename'].to_numpy()
+        num_face_column = detections['num_faces'].to_numpy()
+        face_no_column = detections['face'].to_numpy()
+        talker_column = detections['talker'].to_numpy()
         unique_filenames = np.unique(file_column)
+        allowed_filenames = []
+
+        fakes_excluded = 0
+        multi_faces_excluded = 0
+        excluded_filenames = []
+        face_map = {}
+
+        for k, filename in enumerate(tqdm(file_column)):
+            is_fake = labels_map[filename]
+            num_faces = num_face_column[k]
+            face_no = face_no_column[k]
+            talker = talker_column[k]
+
+            if talker == -1:
+                assert num_faces == 1
+                face_map[filename] = 0
+            elif talker == 1:
+                face_map[filename] = face_no
+
+            if filename in allowed_filenames:
+                continue
+            if filename in excluded_filenames:
+                continue
+
+            if exclude_fakes and is_fake:
+                excluded_filenames.append(filename)
+                fakes_excluded += 1
+                continue
+
+            if num_faces > 1:
+                if exclude_multiple_faces:
+                    excluded_filenames.append(filename)
+                    multi_faces_excluded += 1
+                    continue
+
+                assert talker != -1
+                assert num_faces == 2
+
+            allowed_filenames.append(filename)
+
         train_files, test_files, _, _ = train_test_split(
-            unique_filenames, unique_filenames,
-            random_state=self.seed
+            allowed_filenames, allowed_filenames,
+            random_state=self.seed, train_size=self.train_size
         )
 
+        print(f'FAKES EXCLUDED', fakes_excluded)
+        print(f'MULTI-FACES EXCLUDED', multi_faces_excluded)
+        print(f'TRAIN FILES: {len(train_files)}')
+        print(f'TEST FILES: {len(test_files)}')
+
         self.face_files = unique_filenames
+        self.allowed_filenames = allowed_filenames
         self.train_face_files = train_files
         self.test_face_files = test_files
+        self.face_map = face_map
 
     def prepare_batch(
         self, batch_size, fake_p=0.5,
@@ -163,13 +249,30 @@ class SyncDataset(object):
         mels = real_mels + fake_mels
         images = real_images + fake_images
         labels = [0] * real_count + [1] * fake_count
+
+        if randomize:
+            indexes = np.arange(batch_size)
+            images = self.reorder(images, indexes)
+            labels = self.reorder(labels, indexes)
+            mels = self.reorder(mels, indexes)
+
         return labels, images, mels
+
+    @staticmethod
+    def reorder(items, indexes):
+        new_items = []
+        for index in indexes:
+            new_items.append(items[index])
+
+        return new_items
 
     def load_samples(self, label, num_samples, is_training=True):
         mel_samples, img_samples = [], []
 
         for k in range(num_samples):
-            sample = self.load_sample(label, is_training=is_training)
+            sample = self.load_sample(
+                label, is_training=is_training
+            )
             torch_img, torch_mel = sample
             img_samples.append(torch_img)
             mel_samples.append(torch_mel)
@@ -201,9 +304,14 @@ class SyncDataset(object):
 
     @staticmethod
     def torchify_batch(labels, images, mels):
-        torch_mels = torch.cat(mels, dim=0)
-        torch_images = torch.cat(images, dim=0)
-        torch_labels = torch.FloatTensor(labels)
+        try:
+            torch_mels = torch.cat(mels, dim=0)
+            torch_images = torch.cat(images, dim=0)
+            torch_labels = torch.FloatTensor(labels)
+        except RuntimeError as e:
+            print('TORCH FAIL')
+            raise e
+
         return torch_labels, torch_images, torch_mels
 
     @staticmethod
@@ -223,21 +331,24 @@ class SyncDataset(object):
     @classmethod
     def cv_loader(
         cls, img, mirror_prob=0.5, size=None,
-        verbose=False
+        verbose=False, bottom_half=True
     ):
         if type(img) is str:
             img = cv2.imread(img)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if size is None:
             size = hparams.img_size
 
-        if img.shape[0] != img.shape[1]:
-            assert img.shape[0] == img.shape[1] // 2
-            img = cv2.resize(img, (size, size // 2))
+        if bottom_half:
+            if img.shape[0] != img.shape[1]:
+                assert img.shape[0] == img.shape[1] // 2
+                img = cv2.resize(img, (size, size // 2))
+            else:
+                img = cv2.resize(img, (size, size))
+                img = img[img.shape[0] // 2:, :]
         else:
             img = cv2.resize(img, (size, size))
-            img = img[img.shape[0] // 2:, :]
 
         if random.random() < mirror_prob:
             cls.m_print(verbose, 'FLIP')
@@ -246,6 +357,11 @@ class SyncDataset(object):
             cls.m_print(verbose, 'NO_FLIP')
 
         return img
+
+    @staticmethod
+    def m_print(cond, *args, **kwargs):
+        if cond:
+            print(*args, **kwargs)
 
     @classmethod
     def batch_image_window(
@@ -269,6 +385,29 @@ class SyncDataset(object):
             batch_x = torch.unsqueeze(batch_x, 0)
 
         return batch_x
+
+    @classmethod
+    def batch_images_joon(
+        cls, images, mirror_prob=0.5, torchify=True, size=224
+    ):
+        window = []
+        if random.random() < mirror_prob:
+            flip = 1
+        else:
+            flip = 0
+
+        for image in images:
+            image = cls.cv_loader(
+                image, mirror_prob=flip, bottom_half=False,
+                size=size
+            )
+            window.append(image)
+
+        im = np.stack(window, axis=3)
+        im = np.expand_dims(im, axis=0)
+        im = np.transpose(im, (0, 3, 4, 1, 2))
+        im_batch = torch.from_numpy(im.astype(float)).float()
+        return im_batch
 
     def resolve_fps(self, filename):
         if filename not in self.fps_cache:
@@ -405,8 +544,13 @@ class SyncDataset(object):
 
         return window_fnames
 
-    def is_incomplete_mel(self, torch_mel):
-        if self.syncnet_mel_step_size != torch_mel.shape[-1]:
+    def is_incomplete_mel(
+        self, torch_mel, syncnet_mel_step_size=None
+    ):
+        if syncnet_mel_step_size is None:
+            syncnet_mel_step_size = self.syncnet_mel_step_size
+
+        if syncnet_mel_step_size != torch_mel.shape[-1]:
             return True
 
         return False
@@ -421,6 +565,19 @@ class SyncDataset(object):
 
         torch_batch_x = torch.FloatTensor(mel.T)
         torch_batch_x = torch_batch_x.unsqueeze(0).unsqueeze(0)
+        return torch_batch_x
+
+    def load_mel_joon(
+        self, cct, fps, frame_no, syncnet_mel_step_size=None
+    ):
+        if syncnet_mel_step_size is None:
+            syncnet_mel_step_size = self.syncnet_mel_step_size
+
+        start_idx = int(100. * (frame_no / float(fps)))
+        end_idx = start_idx + syncnet_mel_step_size
+        mel = cct[:, :, :, start_idx: end_idx]
+
+        torch_batch_x = torch.FloatTensor(mel)
         return torch_batch_x
 
     def crop_audio_by_frame(self, spec, frame_no, fps):
