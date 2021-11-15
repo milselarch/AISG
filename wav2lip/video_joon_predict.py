@@ -42,8 +42,7 @@ class VideoSyncPredictor(object):
         self.test_files = open('test.txt').read().split('\n')
 
         self.filenames = (
-            self.swap_fakes.tolist()[:200] +
-            self.test_files[:200]
+            self.real_files.tolist() + self.swap_fakes.tolist()
         )
         random.shuffle(self.filenames)
 
