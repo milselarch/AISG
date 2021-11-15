@@ -3,6 +3,7 @@ try:
 
     from SyncDataset import SyncDataset
     from models import SyncNet_color as SyncNet
+    from models import SyncnetJoon
     from hparams import hparams
 
 except ModuleNotFoundError:
@@ -14,9 +15,11 @@ except ModuleNotFoundError:
 
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 import numpy as np
 import torchvision
 import torch.optim as optim
+import python_speech_features
 import argparse
 import time
 import math
@@ -36,7 +39,7 @@ from torch.utils.tensorboard import SummaryWriter
 # torch.cuda.empty_cache()
 
 def round_sig(x, sig=2):
-    return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
+    return str(round(x, sig))
 
 
 try:
@@ -47,10 +50,10 @@ except RuntimeError:
 class SyncnetTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
-        valid_p=0.05, load_dataset=True, save_threshold=0.01,
+        valid_p=0.05, load_dataset=False, save_threshold=0.01,
         preload_path=None, is_checkpoint=True, syncnet_T=5,
         strict=True, train_workers=0, test_workers=0,
-        pred_fcc=1.0
+        pred_ratio=1.0, use_joon=False, mel_step_size=None
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -73,11 +76,19 @@ class SyncnetTrainer(object):
         self.vfile_writer = None
 
         torch.backends.cudnn.benchmark = True
+        self.use_joon = use_joon
         self.use_cuda = use_cuda
 
-        self.model = SyncNet(
-            self.syncnet_T, pred_fcc=pred_fcc
-        )
+        if use_joon:
+            self.model = SyncnetJoon()
+            if mel_step_size is None:
+                mel_step_size = 20
+        else:
+            self.model = SyncNet(
+                self.syncnet_T, fcc_ratio=pred_ratio
+            )
+            if mel_step_size is None:
+                mel_step_size = 16
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -99,9 +110,11 @@ class SyncnetTrainer(object):
         )
 
         self.load_dataset = load_dataset
+        self.mel_step_size = mel_step_size
         self.dataset = SyncDataset(
             seed=seed, load=load_dataset,
-            train_workers=train_workers, test_workers=test_workers
+            train_workers=train_workers, test_workers=test_workers,
+            mel_step_size=mel_step_size
         )
         
         if preload_path is not None:
@@ -110,10 +123,14 @@ class SyncnetTrainer(object):
             else:
                 self.load_model(preload_path)
 
+    def start_dataset_workers(self):
+        if not self.dataset.loaded:
+            self.dataset.load()
+
     def transform(self, image):
         return self.dataset.transform(image)
 
-    def load_model(self, model_path, eval_mode=True):
+    def load_model(self, model_path, eval_mode=False):
         self.model.load_state_dict(torch.load(model_path))
         if eval_mode:
             self.model.eval()
@@ -190,12 +207,14 @@ class SyncnetTrainer(object):
         else:
             self.model.train(True)
 
-        # with torch.no_grad():
-        preds = self.model.predict(t_mels, t_images)
-        loss = self.criterion(preds, t_labels)
-        loss_value = loss.item()
+        with torch.no_grad():
+            preds = self.model.predict(t_mels, t_images)
+            loss = self.criterion(preds, t_labels)
+            loss_value = loss.item()
 
         self.model.train(True)
+        self.optimizer.zero_grad()
+
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = t_labels.detach().cpu().numpy().flatten()
         score = self.record_metrics(
@@ -230,7 +249,7 @@ class SyncnetTrainer(object):
 
     def face_predict(
         self, face_samples, melspectogram, fps,
-        transpose_audio=False, to_numpy=False
+        transpose_audio=False, to_numpy=False,
     ):
         img_batch, mel_batch = [], []
 
@@ -272,6 +291,70 @@ class SyncnetTrainer(object):
             predictions = predictions.cpu().numpy()
 
         return predictions
+
+    def face_predict_joon(
+        self, face_samples, cct, fps, to_numpy=False,
+        is_raw_audio=False
+    ):
+        if is_raw_audio:
+            cct = self.load_cct(cct)
+
+        img_batch, mel_batch = [], []
+
+        for sample_batch in face_samples:
+            first_face_image = sample_batch[0]
+            frame_no = first_face_image.frame_no
+
+            images = [f.image for f in sample_batch]
+            torch_img_sample = self.dataset.batch_images_joon(
+                images, mirror_prob=0
+            )
+            torch_mel_sample = self.dataset.load_mel_joon(
+                cct, fps=fps, frame_no=frame_no
+            )
+
+            # print(torch_mel_sample.shape[-1])
+            if self.dataset.is_incomplete_mel(torch_mel_sample):
+                continue
+
+            img_batch.append(torch_img_sample)
+            mel_batch.append(torch_mel_sample)
+            # print('TI', torch_img_sample.shape)
+            # print('TM', torch_mel_sample.shape)
+
+        if len(img_batch) == 1:
+            print('SINGLE SAMPLE ONLY')
+            img_batch = [img_batch[0], img_batch[0]]
+            mel_batch = [mel_batch[0], mel_batch[0]]
+
+        torch_img_batch = torch.cat(img_batch).to(self.device)
+        torch_mel_batch = torch.cat(mel_batch).to(self.device)
+        predictions = self.model.predict(
+            torch_mel_batch, torch_img_batch
+        )
+
+        predictions = predictions.detach()
+        if to_numpy:
+            predictions = predictions.cpu().numpy()
+
+        return predictions
+
+    @staticmethod
+    def load_cct(raw_audio, sample_rate=None):
+        if sample_rate is None:
+            sample_rate = hparams.sample_rate
+
+        mfcc = zip(*python_speech_features.mfcc(
+            raw_audio, sample_rate
+        ))
+
+        mfcc = np.stack([np.array(i) for i in mfcc])
+        cc = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=0)
+        cct = torch.autograd.Variable(
+            torch.from_numpy(cc.astype(float)).float()
+        )
+
+        return cct
 
     def predict_file(self, filepath:str):
         raise NotImplemented
@@ -419,8 +502,8 @@ class SyncnetTrainer(object):
         )
 
         smooth_score = min(train_score, validate_score)
-        round_train = round_sig(train_score, sig=2)
-        round_validate = round_sig(validate_score, sig=2)
+        round_train = float(round_sig(train_score, sig=2))
+        round_validate = float(round_sig(validate_score, sig=2))
 
         if round_train == int(round_train):
             round_train = int(round_train)

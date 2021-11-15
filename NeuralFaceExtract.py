@@ -289,9 +289,9 @@ class NeuralFaceExtract(object):
                 pbar=pbar, img_filter=img_filter
             )
 
-            vid_obj.release()
-            del vid_obj, video_cap
-            gc.collect()
+            # vid_obj.release()
+            # del vid_obj, video_cap
+            # gc.collect()
 
     def callback(
         self, filepath, face_image_map, pbar=None,

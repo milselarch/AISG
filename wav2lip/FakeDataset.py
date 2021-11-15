@@ -5,15 +5,16 @@ import numpy as np
 from BaseDataset import BaseDataset
 
 class FakeDataset(BaseDataset):
-    def __init__(self, *args, cache_size=1000, **kwargs):
+    def __init__(self, *args, cache_size=4096, **kwargs):
         super().__init__(*args, **kwargs)
+        self.tag = 'F'
 
         self.mel_stack = []
         self.img_stack = []
 
         self.cache_size = cache_size
-        self.img_cache = [None] * cache_size
-        self.mel_cache = [None] * cache_size
+        self.fake_img_cache = [None] * cache_size
+        self.fake_mel_cache = [None] * cache_size
         self.pre_populate()
 
     def __iter__(self):
@@ -26,18 +27,49 @@ class FakeDataset(BaseDataset):
         return sample
 
     def load_random_video(self):
-        img_filename = self.choose_random_filename()
+        name = self.choose_random_name()
+        filename = f'{name}.mp4'
+        # print('FILENAME', filename)
+
+        assert type(filename) is str
+        current_mel = self.load_audio(filename)
+        current_fps = self.resolve_fps(filename)
+        assert current_fps != 0
+        max_audio_frame = -1 + self.get_audio_max_frame(
+            current_mel, current_fps
+        )
+
+        img_samples, mel_samples = [], []
         image_paths = self.load_image_paths(
-            img_filename, randomize_images=True
+            name, randomize_images=True
         )
 
         for image_path in image_paths:
+            frame_no = self.get_frame_no(image_path)
             window_fnames = self.get_window(image_path)
+            torch_mels = None
+
             if window_fnames is None:
                 continue
 
+            while True:
+                aud_frame_no = random.choice(range(max_audio_frame))
+                if aud_frame_no == frame_no:
+                    continue
+
+                torch_mels = self.load_mel_batch(
+                    current_mel, current_fps, aud_frame_no
+                )
+                if self.is_complete_mel(torch_mels):
+                    break
+
             torch_imgs = self.batch_image_window(window_fnames)
-            self.img_stack.append(torch_imgs)
+            img_samples.append(torch_imgs)
+            mel_samples.append(torch_mels)
+
+        assert len(img_samples) == len(mel_samples)
+        self.img_stack.extend(img_samples)
+        self.mel_stack.extend(mel_samples)
 
     def load_random_audio(self):
         audio_filename = self.choose_random_filename()
@@ -58,34 +90,34 @@ class FakeDataset(BaseDataset):
             self.mel_stack.append(torch_mel_sample)
 
     def log_stack_status(self):
-        print(f'IMG-STACK [{self.ID}] {len(self.img_stack)}')
-        print(f'MEL-STACK [{self.ID}] {len(self.mel_stack)}')
+        print(f'IMG-STACK [{self.name}] {len(self.img_stack)}')
+        print(f'MEL-STACK [{self.name}] {len(self.mel_stack)}')
 
     def pre_populate(self):
         while len(self.img_stack) < self.cache_size:
             self.load_random_video()
             self.log_stack_status()
-        while len(self.mel_stack) < self.cache_size:
-            self.load_random_audio()
-            self.log_stack_status()
 
+        self.verify_stacks()
         for k in range(self.cache_size):
             img_sample = self.img_stack.pop()
             mel_sample = self.mel_stack.pop()
-            self.img_cache[k] = img_sample
-            self.mel_cache[k] = mel_sample
+            self.fake_img_cache[k] = img_sample
+            self.fake_mel_cache[k] = mel_sample
 
     def _load_random_sample(self):
         while len(self.img_stack) == 0:
             self.load_random_video()
-        while len(self.mel_stack) == 0:
-            self.load_random_audio()
 
+        self.verify_stacks()
         index = random.choice(range(self.cache_size))
-        img_sample = self.img_cache[index]
-        mel_sample = self.mel_cache[index]
+        img_sample = self.fake_img_cache[index]
+        mel_sample = self.fake_mel_cache[index]
         assert (img_sample is not None) and (mel_sample is not None)
 
-        self.img_cache[index] = self.img_stack.pop()
-        self.mel_cache[index] = self.mel_stack.pop()
+        self.fake_img_cache[index] = self.img_stack.pop()
+        self.fake_mel_cache[index] = self.mel_stack.pop()
         return img_sample, mel_sample
+
+    def verify_stacks(self):
+        assert len(self.mel_stack) == len(self.img_stack)

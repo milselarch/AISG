@@ -1,3 +1,5 @@
+import random
+
 import ParentImport
 
 import os
@@ -10,11 +12,15 @@ from datetime import datetime
 from NeuralFaceExtract import NeuralFaceExtract
 from SyncnetTrainer import SyncnetTrainer
 
+# preload_path = 'saves/checkpoints/211110-0127/E930304_T0.9_V0.91.pt'
+preload_path = 'saves/checkpoints/211112-1504/E1124960_T0.64_V0.13.pt'
+
 class VideoSyncPredictor(object):
     def __init__(self):
         self.extractor = NeuralFaceExtract()
         self.trainer = SyncnetTrainer(
-            use_cuda=False, load_dataset=False,
+            use_cuda=True, load_dataset=False, use_joon=True,
+            # preload_path=preload_path, is_checkpoint=False,
             preload_path='pretrained/lipsync_expert.pth',
             is_checkpoint=True, strict=False
         )
@@ -31,7 +37,10 @@ class VideoSyncPredictor(object):
         print('SWAPS', self.swap_fakes[:5], self.swap_fakes.shape)
         print('REALS', self.real_files[:5], self.real_files.shape)
 
-        self.filenames = all_filenames
+        # self.filenames = self.swap_fakes
+        self.filenames = open('train.txt').read().split('\n')
+        # self.filenames = ['c59d2549456ad02a.mp4']  # all_filenames
+        # random.shuffle(self.filenames)
         # self.filenames = ['d27c1c217aae3e70.mp4']
         # self.filenames = self.swap_fakes[:3]
 
@@ -98,6 +107,7 @@ class VideoSyncPredictor(object):
             # print('PREDS', face_no, predictions)
             header = f'[{face_no}/{num_faces-1}][{tag}]'
 
+            print(f'NUM PREDICTIONS = {len(predictions)}')
             print(f'predicting {filename} {header}')
             print(f'3rd quartile pred: {quartile_pred_3}')
             print(f'1st quartile pred: {quartile_pred_1}')
@@ -123,7 +133,7 @@ class VideoSyncPredictor(object):
 
         date_stamp = self.make_date_stamp()
         export_path = f'../stats/sync-vid-preds-{date_stamp}.csv'
-        df.to_csv(export_path, index=False)
+        # df.to_csv(export_path, index=False)
         print(f'sync preds exported to {export_path}')
 
 

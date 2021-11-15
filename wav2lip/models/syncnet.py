@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -7,12 +6,12 @@ from .conv import Conv2d
 
 class SyncNet_color(nn.Module):
     def __init__(
-        self, syncnet_T, num_dense_neurons=32,
-        pred_fcc=0.8
+        self, syncnet_T=5, num_dense_neurons=32,
+        fcc_ratio=0.8
     ):
         super(SyncNet_color, self).__init__()
 
-        self.pred_fcc = pred_fcc
+        self.fcc_ratio = fcc_ratio
 
         self.face_encoder = nn.Sequential(
             Conv2d(
