@@ -32,18 +32,20 @@ class VideoSyncPredictor(object):
         is_swap_fake = df['swap_fake'] == 1
         is_real = df['label'] == 0
 
-        self.real_files = df[is_real]['filename'].to_numpy()
-        self.swap_fakes = df[is_swap_fake]['filename'].to_numpy()
-        print('SWAPS', self.swap_fakes[:5], self.swap_fakes.shape)
-        print('REALS', self.real_files[:5], self.real_files.shape)
+        real_files = df[is_real]['filename']
+        swap_fakes = df[is_swap_fake]['filename']
+        self.real_files = real_files.to_numpy().tolist()
+        self.swap_fakes = swap_fakes.to_numpy().tolist()
+
+        print('SWAPS', self.swap_fakes[:5], len(self.swap_fakes))
+        print('REALS', self.real_files[:5], len(self.real_files))
 
         # self.filenames = self.swap_fakes
         self.train_files = open('train.txt').read().split('\n')
         self.test_files = open('test.txt').read().split('\n')
 
-        self.filenames = (
-            self.real_files.tolist() + self.swap_fakes.tolist()
-        )
+        # self.filenames = self.real_files + self.swap_fakes
+        self.filenames = all_filenames
         random.shuffle(self.filenames)
 
         # self.filenames = ['c59d2549456ad02a.mp4']  # all_filenames
