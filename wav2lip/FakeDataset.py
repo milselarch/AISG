@@ -2,7 +2,10 @@ import torch
 import random
 import numpy as np
 
-from BaseDataset import BaseDataset
+try:
+    from BaseDataset import BaseDataset
+except ModuleNotFoundError:
+    from .BaseDataset import BaseDataset
 
 class FakeDataset(BaseDataset):
     def __init__(self, *args, cache_size=4096, **kwargs):
