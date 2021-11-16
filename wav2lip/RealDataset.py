@@ -1,6 +1,10 @@
 import random
 
-from BaseDataset import BaseDataset
+try:
+    from BaseDataset import BaseDataset
+except ModuleNotFoundError:
+    from .BaseDataset import BaseDataset
+
 from queue import Empty as QueueEmpty
 
 class RealDataset(BaseDataset):

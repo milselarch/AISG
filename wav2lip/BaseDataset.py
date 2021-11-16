@@ -3,16 +3,19 @@ from typing import Iterator
 
 try:
     import ParentImport
+    import audio
 
     from FaceAnalysis import FaceCluster
+    from hparams import hparams
 except ModuleNotFoundError:
     from . import ParentImport
+    from . import audio
 
     from ..FaceAnalysis import FaceCluster
+    from .hparams import hparams
 
 import os
 import sys
-import audio
 import random
 import pandas as pd
 import torch.multiprocessing as mp
@@ -23,7 +26,6 @@ import cv2
 import re
 
 from tqdm.auto import tqdm
-from hparams import hparams
 from torch.utils.data import IterableDataset
 from datetime import datetime as Datetime
 

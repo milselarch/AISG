@@ -10,6 +10,11 @@ try:
     from models import SyncNet_color as SyncNet
 
     from FaceAnalysis import FaceCluster
+
+    from BaseDataset import MelCache
+    from BaseDataset import BaseDataset
+    from RealDataset import RealDataset
+    from FakeDataset import FakeDataset
 except ModuleNotFoundError:
     from . import ParentImport
     from . import audio
@@ -20,17 +25,17 @@ except ModuleNotFoundError:
 
     from ..FaceAnalysis import FaceCluster
 
+    from .BaseDataset import MelCache
+    from .BaseDataset import BaseDataset
+    from .RealDataset import RealDataset
+    from .FakeDataset import FakeDataset
+
 import torch
 import os, random, cv2, argparse
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 import pandas as pd
 import numpy as np
-
-from BaseDataset import MelCache
-from BaseDataset import BaseDataset
-from RealDataset import RealDataset
-from FakeDataset import FakeDataset
 
 from tqdm import tqdm
 from torch import nn

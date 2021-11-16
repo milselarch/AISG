@@ -11,6 +11,7 @@ except ModuleNotFoundError:
 
     from .SyncDataset import SyncDataset
     from .models import SyncNet_color as SyncNet
+    from .models import SyncnetJoon
     from .hparams import hparams
 
 import torch
@@ -34,7 +35,11 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from datetime import datetime as Datetime
 from torch.multiprocessing import set_start_method
-from torch.utils.tensorboard import SummaryWriter
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ModuleNotFoundError:
+    print('TENSOR BOARD NOT FOUND')
 
 # torch.cuda.empty_cache()
 
