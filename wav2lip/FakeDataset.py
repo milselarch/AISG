@@ -18,7 +18,7 @@ class FakeDataset(BaseDataset):
         self.cache_size = cache_size
         self.fake_img_cache = [None] * cache_size
         self.fake_mel_cache = [None] * cache_size
-        self.pre_populate()
+        # self.pre_populate()
 
     def __iter__(self):
         while True:
@@ -38,9 +38,6 @@ class FakeDataset(BaseDataset):
         current_mel = self.load_audio(filename)
         current_fps = self.resolve_fps(filename)
         assert current_fps != 0
-        max_audio_frame = -1 + self.get_audio_max_frame(
-            current_mel, current_fps
-        )
 
         img_samples, mel_samples = [], []
         image_paths = self.load_image_paths(
@@ -50,21 +47,12 @@ class FakeDataset(BaseDataset):
         for image_path in image_paths:
             frame_no = self.get_frame_no(image_path)
             window_fnames = self.get_window(image_path)
-            torch_mels = None
+            torch_mels = self.load_random_torch_mel(
+                frame_no, current_mel, current_fps
+            )
 
             if window_fnames is None:
                 continue
-
-            while True:
-                aud_frame_no = random.choice(range(max_audio_frame))
-                if aud_frame_no == frame_no:
-                    continue
-
-                torch_mels = self.load_mel_batch(
-                    current_mel, current_fps, aud_frame_no
-                )
-                if self.is_complete_mel(torch_mels):
-                    break
 
             torch_imgs = self.batch_image_window(window_fnames)
             img_samples.append(torch_imgs)
@@ -73,6 +61,23 @@ class FakeDataset(BaseDataset):
         assert len(img_samples) == len(mel_samples)
         self.img_stack.extend(img_samples)
         self.mel_stack.extend(mel_samples)
+
+    def load_random_torch_mel(
+        self, exclude_frame_no, current_mel, current_fps
+    ):
+        max_audio_frame = -1 + self.get_audio_max_frame(
+            current_mel, current_fps
+        )
+        while True:
+            aud_frame_no = random.choice(range(max_audio_frame))
+            if aud_frame_no == exclude_frame_no:
+                continue
+
+            torch_mels = self.load_mel_batch(
+                current_mel, current_fps, aud_frame_no
+            )
+            if self.is_complete_mel(torch_mels):
+                return torch_mels
 
     def load_random_audio(self):
         audio_filename = self.choose_random_filename()
@@ -109,6 +114,33 @@ class FakeDataset(BaseDataset):
             self.fake_mel_cache[k] = mel_sample
 
     def _load_random_sample(self):
+        name = self.choose_random_name()
+        filename = f'{name}.mp4'
+        # print('FILENAME', filename)
+
+        assert type(filename) is str
+        current_mel = self.load_audio(filename)
+        current_fps = self.resolve_fps(filename)
+        assert current_fps != 0
+
+        frame_no, window_fnames = 0, None
+        image_paths = self.load_image_paths(
+            name, randomize_images=True
+        )
+
+        while window_fnames is None:
+            image_path = random.choice(image_paths)
+            frame_no = self.get_frame_no(image_path)
+            window_fnames = self.get_window(image_path)
+
+        torch_imgs = self.batch_image_window(window_fnames)
+        torch_mels = self.load_random_torch_mel(
+            frame_no, current_mel, current_fps
+        )
+
+        return torch_imgs, torch_mels
+
+    def _load_random_sample_v1(self):
         while len(self.img_stack) == 0:
             self.load_random_video()
 

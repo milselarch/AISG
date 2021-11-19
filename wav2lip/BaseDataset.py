@@ -19,6 +19,7 @@ import sys
 import random
 import pandas as pd
 import torch.multiprocessing as mp
+import python_speech_features
 import numpy as np
 import torch
 import time
@@ -73,7 +74,7 @@ class BaseDataset(object):
         labels_path='../datasets/train.csv',
         detect_path='../stats/mtcnn/labelled-mtcnn.csv',
         log_on_load=False, length=sys.maxsize, face_map=None,
-        mel_cache=None
+        mel_cache=None, use_joon=False
     ):
         super(BaseDataset).__init__()
         print('NEW DATASET')
@@ -102,6 +103,7 @@ class BaseDataset(object):
         self.labels_path = labels_path
         self.detect_path = detect_path
 
+        self.use_joon = use_joon
         self.log_on_load = log_on_load
         self.talker_face_map = None
 
@@ -266,14 +268,16 @@ class BaseDataset(object):
 
         return orig_mel, image_paths, fps
 
-    def load_audio(self, filename, cache_result=True):
+    def load_audio(
+        self, filename, cache_result=True, sample_rate=None
+    ):
+        if sample_rate is None:
+            sample_rate = hparams.sample_rate
+
         assert type(filename) is str
         filename = os.path.basename(filename)
         status = f'{len(self.mel_cache)}'
         name = filename
-
-        if self.log_on_load:
-            print(f'LOAD AUDIO [{self.name}] {filename} {status}')
 
         try:
             name = name[:name.rindex('.')]
@@ -284,10 +288,20 @@ class BaseDataset(object):
             assert type(name) is str
             return self.mel_cache[name]
 
+        if self.log_on_load:
+            print(f'LOAD AUDIO [{self.name}] {filename} {status}')
+
         assert '.' not in name
         audio_path = f'{self.audio_base_dir}/{name}.flac'
-        wav = audio.load_wav(audio_path, hparams.sample_rate)
-        orig_mel = audio.melspectrogram(wav).T
+        wav = audio.load_wav(audio_path, sample_rate)
+
+        if not self.use_joon:
+            orig_mel = audio.melspectrogram(wav).T
+        else:
+            orig_mel = self.load_cct(
+                wav, sample_rate=sample_rate,
+                torchify=False
+            )
 
         if cache_result:
             self.mel_cache[name] = orig_mel
@@ -323,9 +337,14 @@ class BaseDataset(object):
 
         return window_fnames
 
-    @classmethod
-    def batch_image_window(
-        cls, images, mirror_prob=0.5, torchify=True
+    def batch_image_window(self, *args, **kwargs):
+        if not self.use_joon:
+            return self.batch_image_window_wav2lip(*args, **kwargs)
+        else:
+            return self.batch_image_window_joon(*args, **kwargs)
+
+    def batch_image_window_joon(
+        self, images, mirror_prob=0.5, torchify=True, size=224
     ):
         window = []
         if random.random() < mirror_prob:
@@ -334,7 +353,43 @@ class BaseDataset(object):
             flip = 0
 
         for image in images:
-            image = cls.cv_loader(image, mirror_prob=flip)
+            try:
+                image = self.cv_loader(
+                    image, mirror_prob=flip, size=size,
+                    assert_square=True, bottom_half=False
+                )
+            except AssertionError as e:
+                print('CV LOAD FAILED')
+                raise e
+
+            window.append(image)
+
+        im = np.stack(window, axis=3)
+        im = np.expand_dims(im, axis=0)
+        im_batch = np.transpose(im, (0, 3, 4, 1, 2))
+
+        if torchify:
+            im_batch = im_batch.astype(float)
+            im_batch = torch.from_numpy(im_batch).float()
+
+        return im_batch
+
+    @classmethod
+    def batch_images_wav2lip(cls, *args, **kwargs):
+        return self.batch_image_window_wav2lip(*args, **kwargs)
+
+    @classmethod
+    def batch_image_window_wav2lip(
+        cls, images, mirror_prob=0.5, torchify=True, size=None
+    ):
+        window = []
+        if random.random() < mirror_prob:
+            flip = 1
+        else:
+            flip = 0
+
+        for image in images:
+            image = cls.cv_loader(image, mirror_prob=flip, size=size)
             window.append(image)
 
         batch_x = np.concatenate(window, axis=2) / 255.
@@ -349,21 +404,27 @@ class BaseDataset(object):
     @classmethod
     def cv_loader(
         cls, img, mirror_prob=0.5, size=None,
-        verbose=False
+        verbose=False, bottom_half=True, assert_square=True
     ):
         if type(img) is str:
             img = cv2.imread(img)
             # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+        height, width = img.shape[0], img.shape[1]
         if size is None:
             size = hparams.img_size
 
-        if img.shape[0] != img.shape[1]:
-            assert img.shape[0] == img.shape[1] // 2
-            img = cv2.resize(img, (size, size // 2))
+        if bottom_half:
+            if height != width:
+                assert height == width // 2
+                img = cv2.resize(img, (size, size // 2))
+            else:
+                assert not assert_square or (width == height)
+                img = cv2.resize(img, (size, size))
+                img = img[height // 2:, :]
         else:
+            assert not assert_square or (width == height)
             img = cv2.resize(img, (size, size))
-            img = img[img.shape[0] // 2:, :]
 
         if random.random() < mirror_prob:
             cls.m_print(verbose, 'FLIP')
@@ -378,7 +439,57 @@ class BaseDataset(object):
         if cond:
             print(*args, **kwargs)
 
-    def load_mel_batch(
+    @staticmethod
+    def load_cct(
+        raw_audio, sample_rate=None, torchify=True
+    ):
+        if sample_rate is None:
+            sample_rate = hparams.sample_rate
+
+        mfcc = zip(*python_speech_features.mfcc(
+            raw_audio, sample_rate
+        ))
+
+        mfcc = np.stack([np.array(i) for i in mfcc])
+        cc = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=0)
+
+        if torchify:
+            cct = torch.autograd.Variable(
+                torch.from_numpy(cc.astype(float)).float()
+            )
+            return cct
+        else:
+            return cc
+
+    def load_mel_batch(self, *args, **kwargs):
+        if not self.use_joon:
+            return self.load_mel_batch_wav2lip(*args, **kwargs)
+        else:
+            return self._load_mel_batch_joon(*args, **kwargs)
+
+    def _load_mel_batch_joon(
+        self, *args, syncnet_mel_step_size=None, **kwargs
+    ):
+        if syncnet_mel_step_size is None:
+            syncnet_mel_step_size = self.syncnet_mel_step_size
+
+        return self.load_mel_batch_joon(
+            *args, syncnet_mel_step_size=syncnet_mel_step_size,
+            **kwargs
+        )
+
+    @staticmethod
+    def load_mel_batch_joon(
+        cct, fps, frame_no, syncnet_mel_step_size
+    ):
+        start_idx = int(100. * (frame_no / float(fps)))
+        end_idx = start_idx + syncnet_mel_step_size
+        mel = cct[:, :, :, start_idx: end_idx]
+
+        torch_batch_x = torch.FloatTensor(mel)
+        return torch_batch_x
+
+    def load_mel_batch_wav2lip(
         self, orig_mel, fps, frame_no, transpose=False
     ):
         orig_mel = orig_mel.T if transpose else orig_mel
@@ -397,12 +508,12 @@ class BaseDataset(object):
         return self.crop_audio_by_frame(spec, start_frame_num, fps)
 
     @staticmethod
-    def frame_to_index(frame_no, fps):
-        return int(80. * (frame_no / float(fps)))
+    def frame_to_index(frame_no, fps, mels_per_second=80.0):
+        return int(mels_per_second * (frame_no / float(fps)))
 
     @staticmethod
-    def index_to_frame(index, fps):
-        return int(index * (float(fps) / 80.))
+    def index_to_frame(index, fps, mels_per_second=80.0):
+        return int(index * (float(fps) / mels_per_second))
 
     def crop_audio_by_frame(self, spec, frame_no, fps):
         # num_frames = (T x hop_size * fps) / sample_rate
@@ -410,8 +521,17 @@ class BaseDataset(object):
         return self.crop_audio_by_index(spec, start_idx)
 
     def get_audio_max_frame(self, spec, fps):
-        max_index = len(spec) - self.syncnet_mel_step_size
-        max_frame = self.index_to_frame(max_index, fps)
+        if self.use_joon:
+            length = spec.shape[-1]
+            mels_per_second = 100.
+        else:
+            length = spec.shape[0]
+            mels_per_second = 80.
+
+        max_index = length - self.syncnet_mel_step_size
+        max_frame = self.index_to_frame(
+            max_index, fps, mels_per_second=mels_per_second
+        )
         return max_frame
 
     def crop_audio_by_index(self, spec, start_idx):

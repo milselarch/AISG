@@ -57,7 +57,10 @@ class SyncDataset(object):
     def __init__(
         self, seed=32, train_size=0.9, load=False,
         mel_step_size=16, syncnet_T=5, train_workers=0,
-        test_workers=0
+        test_workers=0, use_joon=False,
+        face_base_dir='../datasets-local/mtcnn-faces',
+        video_base_dir='../datasets/train/videos',
+        audio_base_dir='../datasets-local/audios-flac'
     ):
         assert train_workers % 2 == 0
         assert test_workers % 2 == 0
@@ -66,6 +69,7 @@ class SyncDataset(object):
         self.syncnet_mel_step_size = mel_step_size
         self.train_workers = train_workers
         self.test_workers = test_workers
+        self.use_joon = use_joon
 
         self.transform = transforms.Compose([
             transforms.Resize((256, 256)),
@@ -78,9 +82,9 @@ class SyncDataset(object):
             transforms.Normalize([0.5] * 3, [0.5] * 3)
         ])
 
-        self.face_base_dir = '../datasets-local/mtcnn-faces'
-        self.video_base_dir = '../datasets/train/videos'
-        self.audio_base_dir = '../datasets-local/audios-flac'
+        self.face_base_dir = face_base_dir
+        self.video_base_dir = video_base_dir
+        self.audio_base_dir = audio_base_dir
 
         self.train_size = train_size
         self.seed = seed
@@ -114,44 +118,48 @@ class SyncDataset(object):
         else:
             self.mel_cache = None
 
-        Real = functools.partial(
-            RealDataset, log_on_load=log_on_load,
-            queue=train_queue, face_map=self.face_map,
-            mel_cache=self.mel_cache
+        base_kwargs = kwargify(
+            log_on_load=log_on_load, mel_cache=self.mel_cache,
+            face_map=self.face_map, use_joon=self.use_joon,
+            syncnet_mel_step_size=self.syncnet_mel_step_size,
+            face_base_dir=self.face_base_dir,
+            video_base_dir=self.video_base_dir,
+            audio_base_dir=self.audio_base_dir
         )
-        Fake = functools.partial(
-            FakeDataset, log_on_load=log_on_load,
-            face_map=self.face_map, mel_cache=self.mel_cache
+        loader_kwargs = kwargify(
+            batch_size=None,
+            num_workers=self.test_workers // 2,
+            pin_memory=pin_memory
         )
 
-        train_real_data = Real(file_map=self.train_face_files)
+        real_wrap = functools.partial(
+            RealDataset, **base_kwargs,
+            queue=train_queue
+        )
+        fake_wrap = functools.partial(
+            FakeDataset, **base_kwargs
+        )
+
+        train_real_data = real_wrap(file_map=self.train_face_files)
         print(f'TRAIN REAL LOAD', train_real_data.num_files)
         self.train_real_dataset = data_utils.DataLoader(
-            train_real_data, batch_size=None,
-            num_workers=self.train_workers // 2,
-            pin_memory=pin_memory
+            train_real_data, **loader_kwargs
         )
-        train_fake_data = Fake(file_map=self.train_face_files)
+        train_fake_data = fake_wrap(file_map=self.train_face_files)
         print(f'TRAIN FAKE LOAD', train_fake_data.num_files)
         self.train_fake_dataset = data_utils.DataLoader(
-            train_fake_data, batch_size=None,
-            num_workers=self.train_workers // 2,
-            pin_memory=pin_memory
+            train_fake_data, **loader_kwargs
         )
 
-        test_real_data = Real(file_map=self.test_face_files)
+        test_real_data = real_wrap(file_map=self.test_face_files)
         print(f'TEST REAL LOAD', test_real_data.num_files)
         self.test_real_dataset = data_utils.DataLoader(
-            test_real_data, batch_size=None,
-            num_workers=self.test_workers // 2,
-            pin_memory=pin_memory
+            test_real_data, **loader_kwargs
         )
-        test_fake_data = Fake(file_map=self.test_face_files)
+        test_fake_data = fake_wrap(file_map=self.test_face_files)
         print(f'TEST FAKE LOAD', test_fake_data.num_files)
         self.test_fake_dataset = data_utils.DataLoader(
-            test_fake_data, batch_size=None,
-            num_workers=self.test_workers // 2,
-            pin_memory=pin_memory
+            test_fake_data, **loader_kwargs
         )
 
     def load(self):
@@ -327,6 +335,7 @@ class SyncDataset(object):
             print('TORCH FAIL')
             raise e
 
+        torch_labels = torch.unsqueeze(torch_labels, 1)
         return torch_labels, torch_images, torch_mels
 
     @staticmethod
@@ -343,35 +352,13 @@ class SyncDataset(object):
 
             return img.convert('RGB')
 
-    @classmethod
-    def cv_loader(
-        cls, img, mirror_prob=0.5, size=None,
-        verbose=False, bottom_half=True
-    ):
-        if type(img) is str:
-            img = cv2.imread(img)
-            # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    @staticmethod
+    def cv_loader(*args, **kwargs):
+        return BaseDataset.cv_loader(*args, **kwargs)
 
-        if size is None:
-            size = hparams.img_size
-
-        if bottom_half:
-            if img.shape[0] != img.shape[1]:
-                assert img.shape[0] == img.shape[1] // 2
-                img = cv2.resize(img, (size, size // 2))
-            else:
-                img = cv2.resize(img, (size, size))
-                img = img[img.shape[0] // 2:, :]
-        else:
-            img = cv2.resize(img, (size, size))
-
-        if random.random() < mirror_prob:
-            cls.m_print(verbose, 'FLIP')
-            img = cv2.flip(img, 1)
-        else:
-            cls.m_print(verbose, 'NO_FLIP')
-
-        return img
+    @staticmethod
+    def load_cct(*args, **kwargs):
+        return BaseDataset.load_cct(*args, **kwargs)
 
     @staticmethod
     def m_print(cond, *args, **kwargs):
@@ -420,8 +407,12 @@ class SyncDataset(object):
 
         im = np.stack(window, axis=3)
         im = np.expand_dims(im, axis=0)
-        im = np.transpose(im, (0, 3, 4, 1, 2))
-        im_batch = torch.from_numpy(im.astype(float)).float()
+        im_batch = np.transpose(im, (0, 3, 4, 1, 2))
+
+        if torchify:
+            im_batch = im_batch.astype(float)
+            im_batch = torch.from_numpy(im_batch).float()
+
         return im_batch
 
     def resolve_fps(self, filename):
