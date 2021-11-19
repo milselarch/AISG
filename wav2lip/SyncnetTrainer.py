@@ -1,5 +1,6 @@
 try:
     import ParentImport
+    import audio
 
     from SyncDataset import SyncDataset
     from models import SyncNet_color as SyncNet
@@ -8,6 +9,7 @@ try:
 
 except ModuleNotFoundError:
     from . import ParentImport
+    from . import audio
 
     from .SyncDataset import SyncDataset
     from .models import SyncNet_color as SyncNet
@@ -58,11 +60,15 @@ class SyncnetTrainer(object):
         valid_p=0.05, load_dataset=False, save_threshold=0.01,
         preload_path=None, is_checkpoint=True, syncnet_T=5,
         strict=True, train_workers=0, test_workers=0,
-        pred_ratio=1.0, use_joon=False, mel_step_size=None
+        pred_ratio=0., use_joon=False, mel_step_size=None,
+        face_base_dir='../datasets/extract/mtcnn-sync',
+        video_base_dir='../datasets/train/videos',
+        audio_base_dir='../datasets/extract/audios-flac'
     ):
         self.date_stamp = self.make_date_stamp()
 
         self.name = 'color_syncnet'
+        self.pred_ratio = pred_ratio
         self.syncnet_T = syncnet_T
         self.batch_size = 32
         self.epochs = 50
@@ -80,6 +86,10 @@ class SyncnetTrainer(object):
         self.tfile_writer = None
         self.vfile_writer = None
 
+        self.face_base_dir = face_base_dir
+        self.video_base_dir = video_base_dir
+        self.audio_base_dir = audio_base_dir
+
         torch.backends.cudnn.benchmark = True
         self.use_joon = use_joon
         self.use_cuda = use_cuda
@@ -89,9 +99,7 @@ class SyncnetTrainer(object):
             if mel_step_size is None:
                 mel_step_size = 20
         else:
-            self.model = SyncNet(
-                self.syncnet_T, fcc_ratio=pred_ratio
-            )
+            self.model = SyncNet(self.syncnet_T)
             if mel_step_size is None:
                 mel_step_size = 16
 
@@ -119,7 +127,10 @@ class SyncnetTrainer(object):
         self.dataset = SyncDataset(
             seed=seed, load=load_dataset,
             train_workers=train_workers, test_workers=test_workers,
-            mel_step_size=mel_step_size
+            mel_step_size=mel_step_size, use_joon=self.use_joon,
+            face_base_dir=self.face_base_dir,
+            video_base_dir=self.video_base_dir,
+            audio_base_dir=self.audio_base_dir
         )
         
         if preload_path is not None:
@@ -147,6 +158,15 @@ class SyncnetTrainer(object):
         loss = self.criterion(d.unsqueeze(1), labels)
         return loss
 
+    def predict(self, t_mels, t_images):
+        if self.pred_ratio == 0.:
+            assert not self.use_joon
+            return self.model.predict(t_mels, t_images)
+
+        return self.model.pred_fcc(
+            t_mels, t_images, fcc_ratio=self.pred_ratio
+        )
+
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
         record=False
@@ -168,7 +188,7 @@ class SyncnetTrainer(object):
         t_images = t_images.to(self.device)
         t_labels = t_labels.to(self.device).detach()
         # print('INPUTS', t_mels.shape, t_images.shape)
-        preds = self.model.predict(t_mels, t_images)
+        preds = self.predict(t_mels, t_images)
 
         self.optimizer.zero_grad()
         loss = self.criterion(preds, t_labels)
@@ -189,7 +209,7 @@ class SyncnetTrainer(object):
 
     def batch_validate(
         self, episode_no, batch_size=None, fake_p=0.5,
-        enter_eval_mode=False
+        enter_eval_mode=True
     ):
         if batch_size is None:
             batch_size = self.batch_size
@@ -213,7 +233,7 @@ class SyncnetTrainer(object):
             self.model.train(True)
 
         with torch.no_grad():
-            preds = self.model.predict(t_mels, t_images)
+            preds = self.predict(t_mels, t_images)
             loss = self.criterion(preds, t_labels)
             loss_value = loss.item()
 
@@ -254,22 +274,42 @@ class SyncnetTrainer(object):
 
     def face_predict(
         self, face_samples, melspectogram, fps,
-        transpose_audio=False, to_numpy=False,
+        transpose_audio=False, to_numpy=False, use_joon=None,
+        is_raw_audio=False
     ):
+        if use_joon is None:
+            use_joon = self.use_joon
+
+        if is_raw_audio:
+            if use_joon:
+                melspectogram = self.load_cct(melspectogram)
+            else:
+                melspectogram = audio.melspectrogram(
+                    melspectogram
+                ).T
+
         img_batch, mel_batch = [], []
 
         for sample_batch in face_samples:
             first_face_image = sample_batch[0]
             frame_no = first_face_image.frame_no
+            raw_images = [f.image for f in sample_batch]
 
-            images = [f.image for f in sample_batch]
-            torch_img_sample = self.dataset.batch_image_window(
-                images, mirror_prob=0
-            )
-            torch_mel_sample = self.dataset.load_mel_batch(
-                melspectogram, fps=fps, frame_no=frame_no,
-                transpose=transpose_audio
-            )
+            if use_joon:
+                torch_img_sample = self.dataset.batch_images_joon(
+                    raw_images, mirror_prob=0
+                )
+                torch_mel_sample = self.dataset.load_mel_batch_joon(
+                    melspectogram, fps=fps, frame_no=frame_no
+                )
+            else:
+                torch_img_sample = self.dataset.batch_images_wav2lip(
+                    raw_images, mirror_prob=0
+                )
+                torch_mel_sample = self.dataset.load_mel_batch_wav2lip(
+                    melspectogram, fps=fps, frame_no=frame_no,
+                    transpose=transpose_audio
+                )
 
             # print(torch_mel_sample.shape[-1])
             if self.dataset.is_incomplete_mel(torch_mel_sample):
@@ -287,7 +327,7 @@ class SyncnetTrainer(object):
 
         torch_img_batch = torch.cat(img_batch).to(self.device)
         torch_mel_batch = torch.cat(mel_batch).to(self.device)
-        predictions = self.model.predict(
+        predictions = self.predict(
             torch_mel_batch, torch_img_batch
         )
 
@@ -301,67 +341,17 @@ class SyncnetTrainer(object):
         self, face_samples, cct, fps, to_numpy=False,
         is_raw_audio=False
     ):
-        if is_raw_audio:
-            cct = self.load_cct(cct)
-
-        img_batch, mel_batch = [], []
-
-        for sample_batch in face_samples:
-            first_face_image = sample_batch[0]
-            frame_no = first_face_image.frame_no
-
-            images = [f.image for f in sample_batch]
-            torch_img_sample = self.dataset.batch_images_joon(
-                images, mirror_prob=0
-            )
-            torch_mel_sample = self.dataset.load_mel_joon(
-                cct, fps=fps, frame_no=frame_no
-            )
-
-            # print(torch_mel_sample.shape[-1])
-            if self.dataset.is_incomplete_mel(torch_mel_sample):
-                continue
-
-            img_batch.append(torch_img_sample)
-            mel_batch.append(torch_mel_sample)
-            # print('TI', torch_img_sample.shape)
-            # print('TM', torch_mel_sample.shape)
-
-        if len(img_batch) == 1:
-            print('SINGLE SAMPLE ONLY')
-            img_batch = [img_batch[0], img_batch[0]]
-            mel_batch = [mel_batch[0], mel_batch[0]]
-
-        torch_img_batch = torch.cat(img_batch).to(self.device)
-        torch_mel_batch = torch.cat(mel_batch).to(self.device)
-        predictions = self.model.predict(
-            torch_mel_batch, torch_img_batch
+        return self.face_predict(
+            face_samples=face_samples, melspectogram=cct,
+            fps=fps, to_numpy=to_numpy, use_joon=True,
+            is_raw_audio=is_raw_audio
         )
-
-        predictions = predictions.detach()
-        if to_numpy:
-            predictions = predictions.cpu().numpy()
-
-        return predictions
 
     @staticmethod
-    def load_cct(raw_audio, sample_rate=None):
-        if sample_rate is None:
-            sample_rate = hparams.sample_rate
+    def load_cct(*args, **kwargs):
+        return SyncDataset.load_cct(*args, **kwargs)
 
-        mfcc = zip(*python_speech_features.mfcc(
-            raw_audio, sample_rate
-        ))
-
-        mfcc = np.stack([np.array(i) for i in mfcc])
-        cc = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=0)
-        cct = torch.autograd.Variable(
-            torch.from_numpy(cc.astype(float)).float()
-        )
-
-        return cct
-
-    def predict_file(self, filepath:str):
+    def predict_file(self, filepath: str):
         raise NotImplemented
 
     def predict_images(self, image_list, to_numpy=True):
@@ -393,15 +383,6 @@ class SyncnetTrainer(object):
             preds = preds.detach().cpu().numpy()
 
         return preds
-
-    def load_batch(
-        self, batch_filepaths, batch_labels
-    ):
-        batch_x, np_labels = self.dataset.load_batch()
-
-        assert type(batch_x) is np.ndarray
-        assert type(np_labels) is np.ndarray
-        return batch_x, np_labels
 
     def train(
         self, episodes=10 * 1000, batch_size=None,

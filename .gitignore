@@ -1,4 +1,5 @@
 *.zip
+dsets/
 datasets/train/*
 datasets/train/videos
 __pycache__

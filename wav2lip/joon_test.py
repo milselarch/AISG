@@ -58,7 +58,6 @@ def make_batch():
         path = f'{basedir}/{filename}'
         img = cv_loader(path)
         # img = np.expand_dims(img, axis=0)
-        print(f'IMAGE {path} {img.shape}')
         window.append(img)
 
     im = np.stack(window, axis=3)
@@ -67,6 +66,33 @@ def make_batch():
     im_batch = torch.from_numpy(im.astype(float)).float()
 
     return im_batch
+
+
+syncnet_mel_step_size = 20
+
+audio_path = f'../datasets/extract/audios-flac/aa60f634c1594678.flac'
+wav = audio.load_wav(audio_path, hparams.sample_rate)
+orig_mel = audio.melspectrogram(wav).T
+mels = []
+
+# sample_rate, audio_mfcc = wavfile.read(audio_path)
+mfcc = zip(*python_speech_features.mfcc(wav, hparams.sample_rate))
+mfcc = np.stack([np.array(i) for i in mfcc])
+cc = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=0)
+cct = torch.autograd.Variable(torch.from_numpy(cc.astype(float)).float())
+
+print('RAW AUDIO', wav.shape)
+print(f'SAMPLE RATE', hparams.sample_rate)
+print(f'MEL SHAPE', orig_mel.shape)
+print(f'CCT SHAPE', cct.shape)
+print(f'MFCC SHAPE', mfcc.shape)
+
+# length = len(orig_mel)
+cc_batch = [
+    cct[:, :, :, vframe * 4: vframe * 4 + syncnet_mel_step_size]
+    for vframe in range(10)
+]
+cc_in = torch.cat(cc_batch, 0)
 
 
 torch_batch = torch.cat([make_batch() for k in range(5)])
