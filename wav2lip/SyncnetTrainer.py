@@ -337,6 +337,7 @@ class SyncnetTrainer(object):
         torch_mel_batch = torch.cat(mel_batch).to(self.device)
 
         if predict_distance:
+            assert isinstance(self.model, SyncnetJoon)
             predict = self.model.predict_distance
         else:
             predict = self.predict
