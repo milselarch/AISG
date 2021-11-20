@@ -160,12 +160,20 @@ class SyncnetTrainer(object):
 
     def predict(self, t_mels, t_images):
         if self.pred_ratio == 0.:
-            assert not self.use_joon
-            return self.model.predict(t_mels, t_images)
+            # assert not self.use_joon
+            predictions = self.model.predict(t_mels, t_images)
+        else:
+            predictions = self.model.pred_fcc(
+                t_mels, t_images, fcc_ratio=self.pred_ratio
+            )
 
-        return self.model.pred_fcc(
-            t_mels, t_images, fcc_ratio=self.pred_ratio
-        )
+        non_flat_dims = 0
+        for dim in predictions.shape:
+            non_flat_dims += 1 if dim != 1 else 0
+
+        assert non_flat_dims == 1
+        predictions = torch.flatten(predictions)
+        return predictions
 
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
@@ -275,7 +283,7 @@ class SyncnetTrainer(object):
     def face_predict(
         self, face_samples, melspectogram, fps,
         transpose_audio=False, to_numpy=False, use_joon=None,
-        is_raw_audio=False
+        is_raw_audio=False, predict_distance=False
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -327,11 +335,15 @@ class SyncnetTrainer(object):
 
         torch_img_batch = torch.cat(img_batch).to(self.device)
         torch_mel_batch = torch.cat(mel_batch).to(self.device)
-        predictions = self.predict(
-            torch_mel_batch, torch_img_batch
-        )
 
+        if predict_distance:
+            predict = self.model.predict_distance
+        else:
+            predict = self.predict
+
+        predictions = predict(torch_mel_batch, torch_img_batch)
         predictions = predictions.detach()
+
         if to_numpy:
             predictions = predictions.cpu().numpy()
 
@@ -494,6 +506,7 @@ class SyncnetTrainer(object):
         if round_train == int(round_train):
             round_train = int(round_train)
         if round_validate == int(round_validate):
+            round_validate = int(round_validate)
             round_validate = int(round_validate)
 
         print(f'TRAIN ~ {round_train} VALIDATE ~ {round_validate}')
