@@ -172,7 +172,7 @@ class SyncnetJoon(nn.Module):
         return distance
 
     def predict(self, *args, **kwargs):
-        audio_embed, face_embed = self(*args, **kwargs)
+        audio_embed, face_embed = self.forward(*args, **kwargs)
         # print('EMBEDS', audio_embed.shape, face_embed.shape)
         audio_embed = F.normalize(audio_embed, p=2, dim=1)
         face_embed = F.normalize(face_embed, p=2, dim=1)
