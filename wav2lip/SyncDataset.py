@@ -325,7 +325,7 @@ class SyncDataset(object):
             print('TORCH FAIL')
             raise e
 
-        torch_labels = torch.unsqueeze(torch_labels, 1)
+        # torch_labels = torch.unsqueeze(torch_labels, 1)
         return torch_labels, torch_images, torch_mels
 
     @staticmethod

@@ -1,6 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import torch
 
+from torch import nn
+from torch.nn import functional as F
 from .CustomBatchNorms import *
 
 def save(model, filename):
@@ -129,16 +132,23 @@ class SyncnetJoon(nn.Module):
             fcc_list = (fcc_list,)
 
         num_neurons = fcc_list[0]
-        layers = [nn.Linear(2048, fcc_list[0])]
+        dense_layers = []
 
         for k in range(1, len(fcc_list)):
             num_neurons = fcc_list[k]
             prev_neurons = fcc_list[k-1]
-            layer = nn.Linear(prev_neurons, num_neurons)
-            layers.append(layer)
+            dense_layers.extend([
+                nn.Linear(prev_neurons, num_neurons),
+                nn.ReLU()
+            ])
 
-        layers.append(nn.Linear(num_neurons, 1))
-        dense_sequential = nn.Sequential(*layers)
+        dense_sequential = nn.Sequential(
+            nn.Linear(2048, fcc_list[0]),
+            nn.ReLU(),
+            *dense_layers,
+            nn.Linear(num_neurons, 1)
+        )
+
         return dense_sequential
 
     @overrides
@@ -151,7 +161,7 @@ class SyncnetJoon(nn.Module):
         lip_out = self.forward_lip(face_sequences)
         return aud_out, lip_out
 
-    def predict(self, *args, **kwargs):
+    def predict_distance(self, *args, **kwargs):
         audio_embed, face_embed = self.forward(*args, **kwargs)
         # print('EMBEDS', audio_embed.shape, face_embed.shape)
         distance = torch.nn.functional.pairwise_distance(
@@ -160,6 +170,17 @@ class SyncnetJoon(nn.Module):
 
         # print('SIM JOON =', similarity)
         return distance
+
+    def predict(self, *args, **kwargs):
+        audio_embed, face_embed = self(*args, **kwargs)
+        # print('EMBEDS', audio_embed.shape, face_embed.shape)
+        audio_embed = F.normalize(audio_embed, p=2, dim=1)
+        face_embed = F.normalize(face_embed, p=2, dim=1)
+
+        cosine_similarity = nn.functional.cosine_similarity
+        similarity = cosine_similarity(audio_embed, face_embed)
+        similarity = (similarity + 1.) / 2.
+        return 1.0 - similarity
 
     def forward_aud(self, x):
         mid = self.netcnnaud(x)  # N x ch x 24 x M
@@ -178,21 +199,27 @@ class SyncnetJoon(nn.Module):
         out = mid.view((mid.size()[0], -1))  # N x (ch x 24)
         return out
 
-    def dense_predict(self, audio_embeds, image_embeds):
+    def dense_predict(
+        self, audio_embeds, image_embeds, sigmoid=True
+    ):
         flat_embeds = torch.cat(
             [image_embeds, audio_embeds], dim=-1
         )
 
         prediction = self.dense_layer(flat_embeds)
-        prediction = torch.sigmoid(prediction)
+        if sigmoid:
+            prediction = torch.sigmoid(prediction)
+
         return prediction
 
-    def pred_fcc(self, audios, images, fcc_ratio=None):
+    def pred_fcc(self, audios, images, fcc_ratio=None, sigmoid=True):
         if fcc_ratio is None:
             fcc_ratio = self.fcc_ratio
 
         audio_embeds, image_embeds = self.forward(audios, images)
-        prediction = self.dense_predict(audio_embeds, image_embeds)
+        prediction = self.dense_predict(
+            audio_embeds, image_embeds, sigmoid=sigmoid
+        )
 
         if fcc_ratio == 1.:
             return prediction

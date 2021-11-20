@@ -119,7 +119,6 @@ class FakeDataset(BaseDataset):
         # print('FILENAME', filename)
 
         assert type(filename) is str
-        current_mel = self.load_audio(filename)
         current_fps = self.resolve_fps(filename)
         assert current_fps != 0
 
@@ -134,11 +133,28 @@ class FakeDataset(BaseDataset):
             window_fnames = self.get_window(image_path)
 
         torch_imgs = self.batch_image_window(window_fnames)
-        torch_mels = self.load_random_torch_mel(
-            frame_no, current_mel, current_fps
+        torch_mels = self._load_random_audio_sample(
+            filename, exclude_frame_no=frame_no
         )
 
         return torch_imgs, torch_mels
+
+    def _load_random_audio_sample(
+        self, exclude_filename, exclude_frame_no
+    ):
+        filename = self.choose_random_filename()
+        if filename != exclude_filename:
+            exclude_frame_no = None
+
+        current_mel = self.load_audio(filename)
+        current_fps = self.resolve_fps(filename)
+
+        assert current_fps != 0
+        torch_mels = self.load_random_torch_mel(
+            exclude_frame_no, current_mel, current_fps
+        )
+
+        return torch_mels
 
     def _load_random_sample_v1(self):
         while len(self.img_stack) == 0:
