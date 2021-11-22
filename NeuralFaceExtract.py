@@ -229,6 +229,19 @@ class NeuralFaceExtract(object):
         if min(width_in, height_in) < 700:
             scale = 1
 
+        return self.process_video(
+            video_cap, every_n_frames=every_n_frames,
+            batch_size=batch_size, export_size=export_size,
+            skip_detect=skip_detect, ignore_detect=ignore_detect,
+            filepath=filepath
+        )
+
+    def process_video(
+        self, video_cap, every_n_frames=20, batch_size=16,
+        export_size=256, skip_detect=None, ignore_detect=None,
+        scale=1, filepath='test'
+    ):
+        print(f'{filepath} SCALE {scale}')
         vid_obj = loader.load_video(
             video_cap, every_n_frames=every_n_frames,
             scale=scale, reset_index=False
@@ -240,8 +253,6 @@ class NeuralFaceExtract(object):
         # vid_obj = vid_obj.auto_resize()
         vid_obj.auto_resize_inplace()
         vid_obj.force_no_resize()
-
-        print(f'{filepath} SCALE {scale}')
         # np_frames = vid_obj.out_video
 
         face_image_map = FaceExtractor.faces_from_video(

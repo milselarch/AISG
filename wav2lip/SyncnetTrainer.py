@@ -4,6 +4,7 @@ try:
 
     from SyncDataset import SyncDataset
     from models import SyncNet_color as SyncNet
+    from models import SyncnetJoonV1
     from models import SyncnetJoon
     from hparams import hparams
 
@@ -14,6 +15,7 @@ except ModuleNotFoundError:
     from .SyncDataset import SyncDataset
     from .models import SyncNet_color as SyncNet
     from .models import SyncnetJoon
+    from .models import SyncnetJoonV1
     from .hparams import hparams
 
 import torch
@@ -63,7 +65,8 @@ class SyncnetTrainer(object):
         pred_ratio=0., use_joon=False, mel_step_size=None,
         face_base_dir='../datasets/extract/mtcnn-sync',
         video_base_dir='../datasets/train/videos',
-        audio_base_dir='../datasets/extract/audios-flac'
+        audio_base_dir='../datasets/extract/audios-flac',
+        old_joon=True
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -92,10 +95,15 @@ class SyncnetTrainer(object):
 
         torch.backends.cudnn.benchmark = True
         self.use_joon = use_joon
+        self.old_joon = old_joon
         self.use_cuda = use_cuda
 
         if use_joon:
-            self.model = SyncnetJoon()
+            if old_joon:
+                self.model = SyncnetJoonV1()
+            else:
+                self.model = SyncnetJoon()
+
             if mel_step_size is None:
                 mel_step_size = 20
         else:
@@ -283,7 +291,8 @@ class SyncnetTrainer(object):
     def face_predict(
         self, face_samples, melspectogram, fps,
         transpose_audio=False, to_numpy=False, use_joon=None,
-        is_raw_audio=False, predict_distance=False
+        is_raw_audio=False, predict_distance=False,
+        no_grad=True
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -337,12 +346,19 @@ class SyncnetTrainer(object):
         torch_mel_batch = torch.cat(mel_batch).to(self.device)
 
         if predict_distance:
-            assert isinstance(self.model, SyncnetJoon)
+            is_joon_model = isinstance(self.model, SyncnetJoon)
+            is_old_joon_model = isinstance(self.model, SyncnetJoonV1)
+            assert is_joon_model or is_old_joon_model
             predict = self.model.predict_distance
         else:
             predict = self.predict
 
-        predictions = predict(torch_mel_batch, torch_img_batch)
+        if no_grad:
+            with torch.no_grad():
+                predictions = predict(torch_mel_batch, torch_img_batch)
+        else:
+            predictions = predict(torch_mel_batch, torch_img_batch)
+
         predictions = predictions.detach()
 
         if to_numpy:
@@ -352,12 +368,13 @@ class SyncnetTrainer(object):
 
     def face_predict_joon(
         self, face_samples, cct, fps, to_numpy=False,
-        is_raw_audio=False
+        is_raw_audio=False, predict_distance=False
     ):
         return self.face_predict(
             face_samples=face_samples, melspectogram=cct,
-            fps=fps, to_numpy=to_numpy, use_joon=True,
-            is_raw_audio=is_raw_audio
+            to_numpy=to_numpy, is_raw_audio=is_raw_audio,
+            predict_distance=predict_distance, fps=fps,
+            use_joon=True
         )
 
     @staticmethod

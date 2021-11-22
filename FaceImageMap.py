@@ -1,3 +1,5 @@
+import math
+
 class FaceImageMap(object):
     def __init__(self, face_image_map, fps: int):
         self.face_image_map = face_image_map
@@ -31,9 +33,49 @@ class FaceImageMap(object):
 
         return face_samples
 
+    def sample_detected_frames(
+        self, face_no, max_samples=64, min_samples=20,
+        clip_start=True, clip_end=True
+    ):
+        face_samples = self.get_detected_frames(face_no)
+        frame_nos = list(face_samples.keys())
+        print('FACE SAMPLES', len(frame_nos))
+
+        if clip_start and len(frame_nos) > min_samples:
+            frame_nos = frame_nos[1:]
+        if clip_end and len(frame_nos) > min_samples:
+            frame_nos = frame_nos[:-1]
+
+        new_face_samples = {}
+        samples_taken, prev_frame_no = 0, -1
+        interval = math.ceil(len(frame_nos) / max_samples)
+        interval = max(interval, 1)
+
+        for k in range(len (frame_nos)):
+            sample_progress = k / interval
+            frame_no = frame_nos[k]
+
+            if sample_progress < samples_taken:
+                continue
+            if prev_frame_no == frame_no:
+                continue
+
+            new_face_samples[frame_no] = face_samples[frame_no]
+            prev_frame_no = frame_no
+            samples_taken += 1
+
+        try:
+            assert len(new_face_samples) <= max_samples
+        except AssertionError as e:
+            print('FACE SAMPLES TOO MANY', len(new_face_samples))
+            raise e
+
+        return new_face_samples
+
     def sample_face_frames(
         self, face_no, consecutive_frames=1, max_samples=32,
-        require_first_detected=True, extract=False
+        require_first_detected=True, extract=False, clip_p=0,
+        min_samples=20, clip_start=True, clip_end=True
     ):
         face_frames = self.get_face_frames(face_no)
         allowed_frame_nos = []
@@ -53,8 +95,21 @@ class FaceImageMap(object):
             if has_consecutive:
                 allowed_frame_nos.append(frame_no)
 
-        interval = len(allowed_frame_nos) / max_samples
-        samples_taken = 0
+        if clip_start and len(allowed_frame_nos) > min_samples:
+            allowed_frame_nos = allowed_frame_nos[1:]
+        if clip_end and len(allowed_frame_nos) > min_samples:
+            allowed_frame_nos = allowed_frame_nos[:-1]
+
+        clip = int(len(allowed_frame_nos) * clip_p)
+        max_clip = (len(allowed_frame_nos) - min_samples) // 2
+        max_clip = max(max_clip, 0)
+        clip = min(clip, max_clip)
+
+        end_index = len(allowed_frame_nos) - clip
+        allowed_frame_nos = allowed_frame_nos[clip:end_index]
+        interval = math.ceil(len(allowed_frame_nos) / max_samples)
+        interval = max(interval, 1)
+        samples_taken, prev_frame_no = 0, -1
         samples = []
 
         for k in range(len(allowed_frame_nos)):
@@ -64,15 +119,18 @@ class FaceImageMap(object):
 
             face_samples = []
             frame_no = allowed_frame_nos[k]
+            if prev_frame_no == frame_no:
+                continue
 
             for i in range(consecutive_frames):
-                future_frame_no = frame_no + i
-                face_image = face_frames[future_frame_no]
+                window_frame_no = frame_no + i
+                face_image = face_frames[window_frame_no]
                 if extract:
                     face_image = face_image.face_crop
 
                 face_samples.append(face_image)
 
+            prev_frame_no = frame_no
             samples.append(face_samples)
             samples_taken += 1
 
