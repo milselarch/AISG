@@ -201,7 +201,7 @@ class MesoTrainer(object):
         return images_preds
 
     def batch_predict(
-        self, batch_x, to_numpy=True
+        self, batch_x, to_numpy=True, no_grad=False
     ):
         if type(batch_x) is str:
             batch_x = [batch_x]
@@ -221,11 +221,18 @@ class MesoTrainer(object):
 
         self.model.eval()
         torch_batch_x = torch_batch_x.to(self.device)
-        preds = self.model(torch_batch_x)
+        preds = self.predict(torch_batch_x, no_grad=no_grad)
         if to_numpy:
             preds = preds.detach().cpu().numpy()
 
         return preds
+
+    def predict(self, data, no_grad=False):
+        if not no_grad:
+            return self.model(data)
+
+        with torch.no_grad():
+            return self.model(data)
 
     def load_batch(
         self, batch_filepaths, batch_labels

@@ -563,7 +563,10 @@ class SyncDataset(object):
         torch_batch_x = torch_batch_x.unsqueeze(0).unsqueeze(0)
         return torch_batch_x
 
-    def load_mel_joon(
+    def load_mel_joon(self, *args, **kwargs):
+        return self.load_mel_batch_joon(*args, **kwargs)
+
+    def load_mel_batch_joon(
         self, cct, fps, frame_no, syncnet_mel_step_size=None
     ):
         if syncnet_mel_step_size is None:

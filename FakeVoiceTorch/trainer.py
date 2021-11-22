@@ -447,23 +447,83 @@ class Trainer(BaseTrainer):
             audio_arr, is_raw_audio=True
         )
 
+    @staticmethod
+    def sub_sample_mel(
+        mel_spec_array, max_samples=256, min_samples=128, clip_p=0
+    ):
+        # print('MEL ARR SHAPE', mel_spec_array.shape)
+        assert clip_p < 0.5
+        clip = int(len(mel_spec_array) * clip_p)
+        end_index = len(mel_spec_array) - clip
+
+        if len(mel_spec_array) > min_samples + 2 * clip:
+            mel_spec_array = mel_spec_array[clip:end_index]
+
+        interval = math.ceil(len(mel_spec_array) / max_samples)
+        interval = max(interval, 1)
+        samples_taken, prev_index = 0, -1
+        new_mel_spec_array = []
+
+        for index in range(len(mel_spec_array)):
+            sample_progress = index / interval
+            if sample_progress < samples_taken:
+                continue
+
+            if prev_index == index:
+                continue
+
+            prev_index = index
+            mel = mel_spec_array[index]
+            new_mel_spec_array.append(mel)
+            samples_taken += 1
+
+        new_mel_spec_array = np.stack(
+            new_mel_spec_array, axis=0
+        )
+
+        # print('NEW MEL ARR', new_mel_spec_array.shape)
+        assert len(new_mel_spec_array) > 1
+        assert len(new_mel_spec_array) <= max_samples
+        return mel_spec_array
+
     def predict_raw_audio(
-        self, audio_arr, to_numpy=True, max_length=1024
+        self, audio_arr, to_numpy=True, max_length=512,
+        max_samples=None, min_samples=0, clip_p=0,
+        max_batch_size=None, no_grad=False
     ):
         mel_spec_array = self.load_melspectrogram(audio_arr)
+        if max_samples is not None:
+            mel_spec_array = self.sub_sample_mel(
+                mel_spec_array, max_samples=max_samples,
+                min_samples=min_samples, clip_p=clip_p
+            )
+
         batch_x = np.array([mel_spec_array])
         batch_x = self.reshape_batch(batch_x)
         torch_batch_x = torch.tensor(batch_x).to(self.device)
+        mel_length = torch_batch_x.shape[1]
         # print('AUD TORCH BATCH', torch_batch_x.shape)
 
+        if max_batch_size is None:
+            pass
+        elif mel_length >= max_batch_size ** 3:
+            mel_length -= mel_length % max_batch_size
+            torch_batch_x = torch_batch_x[:, :mel_length, :, :]
+            torch_batch_x = self.reshape_batch(
+                torch_batch_x, max_batch_size
+            )
+
+        # print('AUD TORCH BATCH', torch_batch_x.shape)
         self.model.eval()
         mel_length = torch_batch_x.shape[1]
         total_preds = []
         index = 0
 
         while index < mel_length:
-            sub_mel = torch_batch_x[0, index: index+max_length]
-            preds = self.model(sub_mel)
+            sub_mel = torch_batch_x[:, index: index+max_length]
+            preds = self.predict(sub_mel, no_grad=no_grad)
+            preds = torch.flatten(preds)
+            # print('PREDS', preds.shape)
             total_preds.append(preds)
             # print('PREDS', preds.shape)
             index += max_length
@@ -475,6 +535,13 @@ class Trainer(BaseTrainer):
             total_preds = total_preds.detach().cpu().numpy()
 
         return total_preds
+
+    def predict(self, data, no_grad=False):
+        if not no_grad:
+            return self.model(data)
+
+        with torch.no_grad():
+            return self.model(data)
 
     def batch_predict(
         self, batch_x, to_numpy=True, parallel_load=True
@@ -543,10 +610,13 @@ class Trainer(BaseTrainer):
         return batch_x, np_labels
 
     @staticmethod
-    def reshape_batch(data_batch):
+    def reshape_batch(data_batch, batch_size=None):
         assert data_batch.shape[2] == utils.hparams.num_mels
+        if batch_size is None:
+            batch_size = len(data_batch)
+
         batch_x = data_batch.reshape((
-            len(data_batch), -1, utils.hparams.num_mels, 1
+            batch_size, -1, utils.hparams.num_mels, 1
         ))
         return batch_x
 
