@@ -368,7 +368,8 @@ class NeuralFaceExtract(object):
     def extract_all(
         self, filenames=None, every_n_frames=20,
         export_size=256, skip_detect=None, ignore_detect=None,
-        img_filter=lambda x, f: x
+        img_filter=lambda x, f: x, basedir='datasets',
+        video_base_dir='datasets/train/videos'
     ):
         self.filename_log = []
         self.num_face_log = []
@@ -380,15 +381,15 @@ class NeuralFaceExtract(object):
         self.right_log = []
         self.bottom_log = []
 
-        dataset = datasets.Dataset(basedir='datasets')
         if filenames is None:
+            dataset = datasets.Dataset(basedir=basedir)
             filenames = dataset.all_videos[:].tolist()
 
         filepaths = []
 
         for k in range(len(filenames)):
             filename = filenames[k]
-            filepath = f'datasets/train/videos/{filename}'
+            filepath = f'{video_base_dir}/{filename}'
             filepaths.append(filepath)
 
         start_time = time.perf_counter()

@@ -58,9 +58,10 @@ class SyncDataset(object):
         self, seed=32, train_size=0.9, load=False,
         mel_step_size=16, syncnet_T=5, train_workers=0,
         test_workers=0, use_joon=False,
-        face_base_dir='../datasets-local/mtcnn-faces',
+        face_base_dir='../datasets/extract/mtcnn-faces',
         video_base_dir='../datasets/train/videos',
-        audio_base_dir='../datasets-local/audios-flac'
+        audio_base_dir='../datasets/extract/audios-flac',
+        mel_cache_path=None
     ):
         assert train_workers % 2 == 0
         assert test_workers % 2 == 0
@@ -85,6 +86,7 @@ class SyncDataset(object):
         self.face_base_dir = face_base_dir
         self.video_base_dir = video_base_dir
         self.audio_base_dir = audio_base_dir
+        self.mel_cache_path = mel_cache_path
 
         self.train_size = train_size
         self.seed = seed
@@ -108,17 +110,21 @@ class SyncDataset(object):
         if load:
             self.load()
 
-    def start_data_loaders(self, pin_memory=True, log_on_load=True):
-        train_queue = mp.Queue()
-        for k in range(self.train_workers):
-            train_queue.put(k)
+    def start_mel_cache(self):
+        if self.mel_cache is not None:
+            return False
 
         if (self.train_workers == 0) and (self.test_workers == 0):
             self.mel_cache = MelCache()
+            if self.mel_cache_path is not None:
+                self.mel_cache.preload(self.mel_cache_path)
         else:
             self.mel_cache = None
 
-        base_kwargs = kwargify(
+        return True
+
+    def _make_base_kwargs(self, log_on_load=False):
+        return kwargify(
             log_on_load=log_on_load, mel_cache=self.mel_cache,
             face_map=self.face_map, use_joon=self.use_joon,
             syncnet_mel_step_size=self.syncnet_mel_step_size,
@@ -126,6 +132,29 @@ class SyncDataset(object):
             video_base_dir=self.video_base_dir,
             audio_base_dir=self.audio_base_dir
         )
+
+    def make_data_loader(self, file_map=None):
+        if file_map is None:
+            file_map = self.train_face_files
+
+        self.start_mel_cache()
+        base_kwargs = self._make_base_kwargs()
+
+        dataset = RealDataset(file_map, **base_kwargs)
+        dataloader = data_utils.DataLoader(
+            dataset, batch_size=None, num_workers=0,
+            pin_memory=False
+        )
+
+        return dataset, dataloader
+
+    def start_data_loaders(self, pin_memory=True, log_on_load=True):
+        train_queue = mp.Queue()
+        for k in range(self.train_workers):
+            train_queue.put(k)
+
+        self.start_mel_cache()
+        base_kwargs = self._make_base_kwargs(log_on_load)
         loader_kwargs = kwargify(
             batch_size=None,
             num_workers=self.test_workers // 2,
@@ -265,6 +294,8 @@ class SyncDataset(object):
 
         if randomize:
             indexes = np.arange(batch_size)
+            np.random.shuffle(indexes)
+
             images = self.reorder(images, indexes)
             labels = self.reorder(labels, indexes)
             mels = self.reorder(mels, indexes)

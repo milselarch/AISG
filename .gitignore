@@ -18,5 +18,6 @@ __pycache__
 *.profile
 *.crdownload
 *.lock.*
+*.npy
 
 Dockerfile

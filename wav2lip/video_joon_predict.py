@@ -6,6 +6,7 @@ import os
 import audio
 import pandas as pd
 import numpy as np
+import cProfile
 
 from hparams import hparams
 from datetime import datetime
@@ -14,6 +15,10 @@ from SyncnetTrainer import SyncnetTrainer
 
 # preload_path = 'saves/checkpoints/211110-0127/E930304_T0.9_V0.91.pt'
 # preload_path = 'saves/checkpoints/211112-1504/E1124960_T0.64_V0.13.pt'
+# preload_path = 'pretrained/syncnet_joon.model'
+# preload_path = 'saves/checkpoints/211120-1303/E2558336_T0.73_V0.65.pt'
+# preload_path = 'saves/checkpoints/211125-0108/E1261472_T0.6_V0.54.pt'
+preload_path = 'saves/checkpoints/211125-0108/E1178048_T0.6_V0.52.pt'
 
 class VideoSyncPredictor(object):
     def __init__(self):
@@ -21,10 +26,11 @@ class VideoSyncPredictor(object):
         self.trainer = SyncnetTrainer(
             use_cuda=True, load_dataset=False, use_joon=True,
             # preload_path=preload_path, is_checkpoint=False,
-            preload_path='pretrained/syncnet_joon.model',
+            preload_path=preload_path, old_joon=False, pred_ratio=1.0,
             is_checkpoint=False
         )
 
+        # self.trainer.model.disable_norm_toggle()
         self.audio_base_dir = '../datasets/extract/audios-flac'
 
         df = pd.read_csv('../stats/all-labels.csv')
@@ -37,6 +43,7 @@ class VideoSyncPredictor(object):
         self.real_files = real_files.to_numpy().tolist()
         self.swap_fakes = swap_fakes.to_numpy().tolist()
 
+        print(f'num files loaded {all_filenames}')
         print('SWAPS', self.swap_fakes[:5], len(self.swap_fakes))
         print('REALS', self.real_files[:5], len(self.real_files))
 
@@ -56,6 +63,8 @@ class VideoSyncPredictor(object):
         self.face_log = []
         self.mean_preds = []
         self.filename_log = []
+
+        self.std_preds = []
         self.median_preds = []
         self.quartile_preds_3 = []
         self.quartile_preds_1 = []
@@ -100,6 +109,7 @@ class VideoSyncPredictor(object):
                 to_numpy=True, is_raw_audio=True
             )
 
+            std_pred = np.std(predictions)
             mean_pred = np.mean(predictions)
             median_pred = np.median(predictions)
             quartile_pred_3 = np.percentile(sorted(predictions), 75)
@@ -111,6 +121,7 @@ class VideoSyncPredictor(object):
             self.filename_log.append(filename)
             self.median_preds.append(median_pred)
             self.mean_preds.append(mean_pred)
+            self.std_preds.append(std_pred)
 
             # print('PREDS', face_no, predictions)
             header = f'[{face_no}/{num_faces-1}][{tag}]'
@@ -121,6 +132,24 @@ class VideoSyncPredictor(object):
             print(f'1st quartile pred: {quartile_pred_1}')
             print(f'median pred: {median_pred}')
             print(f'mean pred: {mean_pred}')
+            print(f'std pred: {std_pred}')
+
+    def profile_start(self, profile_dir='saves/profiles'):
+        stamp = self.make_date_stamp()
+        assert os.path.isdir(profile_dir)
+        profile_path = f'{profile_dir}/joon-pred-{stamp}.profile'
+        profile = cProfile.Profile()
+        profile.enable()
+
+        try:
+            self.start()
+        except Exception as e:
+            print('TRAINING FAILED')
+            raise e
+        finally:
+            profile.disable()
+            profile.dump_stats(profile_path)
+            print(f'profile saved to {profile_path}')
 
     def start(self):
         self.extractor.process_filepaths(
@@ -132,6 +161,7 @@ class VideoSyncPredictor(object):
 
         df = pd.DataFrame(data={
             'filename': self.filename_log,
+            'std_pred': self.std_preds,
             'mean_pred': self.mean_preds,
             'median_pred': self.median_preds,
             '1st_quartile_pred': self.quartile_preds_1,
@@ -147,4 +177,4 @@ class VideoSyncPredictor(object):
 
 if __name__ == '__main__':
     sync_predictor = VideoSyncPredictor()
-    sync_predictor.start()
+    sync_predictor.profile_start()
