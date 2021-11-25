@@ -60,6 +60,15 @@ class MelCache(object):
     def __len__(self):
         return len(self.cache)
 
+    def preload(self, mel_cache_path, use_joon=True):
+        print(f'LOADING MEL CACHE: {mel_cache_path}')
+
+        file_obj = open(mel_cache_path, 'rb')
+        preprocessed = np.load(file_obj, allow_pickle=True)
+        self.cache = preprocessed[()]
+
+        if use_joon and (self.cache['cache_type'] != 'cct'):
+            raise ValueError('NOT USING JOON')
 
 class BaseDataset(object):
     __ID = 0
@@ -291,20 +300,35 @@ class BaseDataset(object):
         if self.log_on_load:
             print(f'LOAD AUDIO [{self.name}] {filename} {status}')
 
-        assert '.' not in name
-        audio_path = f'{self.audio_base_dir}/{name}.flac'
-        wav = audio.load_wav(audio_path, sample_rate)
-
-        if not self.use_joon:
-            orig_mel = audio.melspectrogram(wav).T
-        else:
-            orig_mel = self.load_cct(
-                wav, sample_rate=sample_rate,
-                torchify=False
-            )
+        orig_mel = self.load_audio_file(
+            name, audio_base_dir=self.audio_base_dir,
+            sample_rate=sample_rate, use_joon=self.use_joon
+        )
 
         if cache_result:
             self.mel_cache[name] = orig_mel
+
+        return orig_mel
+
+    @classmethod
+    def load_audio_file(
+        cls, name, audio_base_dir, sample_rate=None,
+        use_joon=True
+    ):
+        if sample_rate is None:
+            sample_rate = hparams.sample_rate
+
+        assert '.' not in name
+        audio_path = f'{audio_base_dir}/{name}.flac'
+        wav = audio.load_wav(audio_path, sample_rate)
+
+        if not use_joon:
+            orig_mel = audio.melspectrogram(wav).T
+        else:
+            orig_mel = cls.load_cct(
+                wav, sample_rate=sample_rate,
+                torchify=False
+            )
 
         return orig_mel
 
@@ -321,6 +345,28 @@ class BaseDataset(object):
         name = base_filename[:base_filename.index('.')]
         face_no, frame_no = [int(x) for x in name.split('-')]
         return face_no, frame_no
+
+    @classmethod
+    def filter_image_paths(
+        cls, image_paths, target_frame_no=None, target_face_no=None,
+        ensure_single=False
+    ):
+        target_image_paths = []
+
+        for image_path in image_paths:
+            face_no, frame_no = cls.extract_frame(image_path)
+
+            if frame_no != target_frame_no:
+                if target_face_no is not None:
+                    continue
+            elif face_no != target_face_no:
+                if target_face_no is not None:
+                    continue
+
+            target_image_paths.append(image_path)
+
+        assert not ensure_single or (len(target_image_paths) == 1)
+        return target_image_paths
 
     def get_window(self, image_path):
         dirpath = os.path.dirname(image_path)

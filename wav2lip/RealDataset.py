@@ -63,13 +63,20 @@ class RealDataset(BaseDataset):
             length = len(self.rand_cache)
             print(f'IMG-L [{self.name}] {filled}/{length}')
 
-    def load_sample(self):
+    def load_sample(self, *args, **kwargs):
         if not self.cache_all:
             return self.load_random_sample()
         else:
-            return self.load_deliberate_sample()
+            return self.load_deliberate_sample(
+                *args, **kwargs
+            )
 
-    def load_deliberate_sample(self, filename=None):
+    def choose_sample(self, *args, **kwargs):
+        return self.load_deliberate_sample(*args, **kwargs)
+
+    def load_deliberate_sample(
+        self, filename=None, frame_no=None, face_no=None
+    ):
         if filename is None:
             filename = self.choose_random_filename()
 
@@ -77,7 +84,9 @@ class RealDataset(BaseDataset):
         current_fps = self.resolve_fps(filename)
 
         while True:
-            image_path, torch_imgs = self.load_torch_window(filename)
+            image_path, torch_imgs = self.load_torch_window(
+                filename, frame_no=frame_no, face_no=face_no
+            )
             frame_no = self.get_frame_no(image_path)
             torch_mels = self.load_mel_batch(
                 current_mel, current_fps, frame_no
@@ -108,12 +117,19 @@ class RealDataset(BaseDataset):
         cache = self.rand_cache[index]
         return cache
 
-    def load_torch_window(self, filename):
+    def load_torch_window(
+        self, filename, frame_no=None, face_no=None
+    ):
         window_fnames, image_path = None, None
 
         while window_fnames is None:
-            image_path = self.load_image_paths(
+            image_paths = self.load_image_paths(
                 filename, randomize_images=True, num_samples=1
+            )
+
+            image_path = self.filter_image_paths(
+                image_paths, target_frame_no=frame_no,
+                target_face_no=face_no, ensure_single=False
             )[0]
 
             window_fnames = self.get_window(image_path)
