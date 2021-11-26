@@ -18,10 +18,14 @@ def load(filename):
 class SyncnetJoon(nn.Module):
     def __init__(
         self, num_layers_in_fc_layers=1024,
-        fcc_ratio=0., fcc_list=(128, 16), dropout_p=0.0
+        fcc_ratio=0., fcc_list=(128, 16),
+        dropout_p=0.0
     ):
         super(SyncnetJoon, self).__init__()
         self.toggle_norms = True
+
+        if fcc_list is None:
+            fcc_list = (128, 16)
 
         self.__nFeatures__ = 24
         self.__nChs__ = 32
@@ -138,7 +142,6 @@ class SyncnetJoon(nn.Module):
         num_neurons = fcc_list[0]
         dense_layers = [
             nn.Linear(2048, fcc_list[0]),
-            nn.ReLU()
         ]
 
         if dropout_p > 0.0:
@@ -146,17 +149,17 @@ class SyncnetJoon(nn.Module):
                 dropout_p
             ))
 
+        dense_layers.append(nn.ReLU())
+
         for k in range(1, len(fcc_list)):
             num_neurons = fcc_list[k]
             prev_neurons = fcc_list[k-1]
-            dense_layers.extend([
-                nn.Linear(prev_neurons, num_neurons),
-                nn.ReLU()
-            ])
+            dense_layers.append(nn.Linear(prev_neurons, num_neurons))
+
             if dropout_p > 0.0:
-                dense_layers.append(nn.Dropout(
-                    dropout_p
-                ))
+                dense_layers.append(nn.Dropout(dropout_p))
+
+            dense_layers.append(nn.ReLU())
 
         dense_sequential = nn.Sequential(
             *dense_layers,

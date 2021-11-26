@@ -296,7 +296,7 @@ class MesoTrainer(object):
             pbar.set_description(desc)
             pbar.update(batch_size)
             episode_no += batch_size
-            time.sleep(0.1)
+            # time.sleep(0.1)
 
             # at_checkpoint = episode_no % self.save_best_every == 0
             episodes_past = episode_no - last_checkpoint

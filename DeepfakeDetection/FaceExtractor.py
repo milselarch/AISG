@@ -92,10 +92,12 @@ class Area(object):
 class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
-        frame_no: int, num_faces: int, detected: bool
+        frame_no: int, num_faces: int, detected: bool,
+        mouth_image=None
     ):
         assert len(coords) == 4
         self.image = image
+        self.mouth_image = mouth_image
 
         self.coords = coords
         self.face_no = face_no
@@ -313,13 +315,21 @@ class FaceExtractor(object):
 
                 face_box = (left, top, right, bottom)
                 face_key = (frame_no, face_box)
-                face_crop, ratio = face_crop_map[face_key]
+                extraction = face_crop_map[face_key]
+                mouth_crop = None
+
+                if type(extraction) is tuple:
+                    face_crop, ratio = extraction
+                else:
+                    mouth_crop = extraction.mouth_crop
+                    face_crop = extraction.face_crop
+                    # ratio = extraction.ratio
 
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
                     face_no=shifted_face_no, frame_no=frame_no,
-                    num_faces=num_export_faces,
-                    detected=detected
+                    num_faces=num_export_faces, detected=detected,
+                    mouth_image=mouth_crop
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)

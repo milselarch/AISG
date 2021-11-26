@@ -26,6 +26,19 @@ from PIL import Image, ImageDraw
 from datetime import datetime
 from tqdm.auto import tqdm
 
+class ImageMap(object):
+    def __init__(
+        self, face_crop, mouth_crop, landmark=None,
+        frame_no=None, ratio=None
+    ):
+        self.face_crop = face_crop
+        self.ratio = ratio
+
+        self.mouth_crop = mouth_crop
+        self.landmark = landmark
+        self.frame_no = frame_no
+
+
 class NeuralFaceExtract(object):
     def __init__(self):
         self.export_dir = 'datasets-local/mtcnn-faces'
@@ -78,26 +91,35 @@ class NeuralFaceExtract(object):
                 last_frame_no = frame_no
 
         frame_face_boxes, index = [], 0
-        face_confs = []
+        face_confs, face_landmarks = [], []
 
         while index < len(sub_frames):
             # print(index, len(sub_frames))
             end_index = index + batch_size
             batch = sub_frames[index:end_index]
             np_batch = frames.resolve_batch(batch)
-            bboxes, bconfs = self.mtcnn.detect(np_batch)
+            bboxes, bconfs, landmarks = self.mtcnn.detect(
+                np_batch, landmarks=True
+            )
 
             face_confs.extend(bconfs)
             frame_face_boxes.extend(bboxes)
+            face_landmarks.extend(landmarks)
             index = end_index
 
-        iterator = zip(sub_frame_nos, frame_face_boxes, face_confs)
         detect_map = {}
+        iterator = zip(
+            sub_frame_nos, frame_face_boxes, face_confs,
+            face_landmarks
+        )
 
-        for frame_no, bbox, bconf in iterator:
-            detect_map[frame_no] = (bbox, bconf)
+        for frame_no, bbox, bconf, landmark in iterator:
+            detect_map[frame_no] = (bbox, bconf, landmark)
 
-        prev_bboxes, prev_bconfs = None, None
+        prev_landmarks = None
+        prev_bboxes = None
+        prev_bconfs = None
+
         total_face_frame_boxes = []
         total_face_confs = []
         detect_frame_nos = []
@@ -113,7 +135,8 @@ class NeuralFaceExtract(object):
             np_frame = None
 
             if frame_no in detect_map:
-                prev_bboxes, prev_bconfs = detect_map[frame_no]
+                info = detect_map[frame_no]
+                prev_bboxes, prev_bconfs, prev_landmarks = info
                 detect_frame_nos.append(frame_no)
                 last_detect_frame_no = frame_no
             elif frame_no - last_detect_frame_no >= skip_detect:
@@ -123,6 +146,8 @@ class NeuralFaceExtract(object):
                 prev_bboxes, prev_bconfs = None, None
 
             if prev_bboxes is not None:
+                assert len(prev_bboxes) == len(prev_landmarks)
+
                 # extract face images
                 for i, bbox in enumerate(prev_bboxes):
                     if np_frame is None:
@@ -136,12 +161,20 @@ class NeuralFaceExtract(object):
                     key = (frame_no, bbox_tuple)
                     left, top, right, bottom = bbox
 
-                    extraction = FaceExtractor.get_square_face(
+                    face_crop, ratio = FaceExtractor.get_square_face(
                         np_frame, top, left, right, bottom,
                         rescale_ratios=None, rescale=1,
                         export_size=export_size
                     )
-                    face_crop_map[key] = extraction
+                    landmark = prev_landmarks[i]
+                    mouth_crop = self.extract_mouth_crop(
+                        np_frame, landmark, export_size=export_size
+                    )
+                    face_crop_map[key] = ImageMap(
+                        face_crop=face_crop, mouth_crop=mouth_crop,
+                        landmark=landmark, frame_no=frame_no,
+                        ratio=ratio
+                    )
 
             total_face_frame_boxes.append(prev_bboxes)
             total_face_confs.append(prev_bconfs)
@@ -150,6 +183,33 @@ class NeuralFaceExtract(object):
             total_face_frame_boxes, total_face_confs,
             detect_frame_nos, face_crop_map
         )
+
+    @staticmethod
+    def extract_mouth_crop(
+        np_frame, landmark, export_size,
+        crop_buffer_ratio=0.5
+    ):
+        left_lip_coord, right_lip_coord = landmark[-2:]
+        left_lip_x, left_lip_y = left_lip_coord
+        right_lip_x, right_lip_y = right_lip_coord
+
+        midpoint_x = (left_lip_x + right_lip_x) / 2.
+        midpoint_y = (left_lip_y + right_lip_y) / 2.
+        lip_width = right_lip_x - left_lip_x
+        crop_width = lip_width * (1. + crop_buffer_ratio)
+
+        left = midpoint_x - crop_width / 2.
+        right = midpoint_x + crop_width / 2.
+        top = midpoint_y - crop_width / 2.
+        bottom = midpoint_y + crop_width / 2.
+
+        mouth_crop, ratio = FaceExtractor.get_square_face(
+            np_frame, top, left, right, bottom,
+            rescale_ratios=None, rescale=1,
+            export_size=export_size
+        )
+
+        return mouth_crop
 
     def fill_face_maps(
         self, frames, interval, batch_size, skip_detect=None,
@@ -166,12 +226,14 @@ class NeuralFaceExtract(object):
         detect_frame_nos = extract_result[2]
         face_crop_map = extract_result[3]
 
-        max_faces, face_mapping = 0, {}
+        max_faces = 0
+        face_mapping, landmark_map = {}, {}
         # assert len(frame_face_boxes) == len(np_frames)
         # print(frame_face_boxes)
 
         for k in range(len(frame_face_boxes)):
             frame_no = interval * k
+
             face_locations = []
             face_mapping[frame_no] = face_locations
 
@@ -184,7 +246,9 @@ class NeuralFaceExtract(object):
 
             assert bconfs is not None
             assert bboxes is not None
-            for bbox, bconf in zip(bboxes, bconfs):
+            iterable = zip(bboxes, bconfs)
+
+            for bbox, bconf in iterable:
                 if bconf < 0.991:
                     # face detection confidence threshold
                     continue
@@ -304,9 +368,9 @@ class NeuralFaceExtract(object):
             # del vid_obj, video_cap
             # gc.collect()
 
-    def callback(
+    def save_image_map(
         self, filepath, face_image_map, pbar=None,
-        img_filter=lambda x, f: x
+        img_filter=lambda x, f: x, save_mouth=False
     ):
         if face_image_map is None:
             print(f'VIDEO LOAD FAILED {filepath}')
@@ -335,7 +399,11 @@ class NeuralFaceExtract(object):
             for i, frame_no in enumerate(faces):
                 face = faces[frame_no]
 
-                frame = face.image
+                if save_mouth:
+                    frame = face.mouth_image
+                else:
+                    frame = face.image
+
                 face_no = face.face_no
                 frame_no = face.frame_no
                 num_faces = face.num_faces
@@ -367,7 +435,8 @@ class NeuralFaceExtract(object):
         self, filenames=None, every_n_frames=20,
         export_size=256, skip_detect=None, ignore_detect=None,
         img_filter=lambda x, f: x, basedir='datasets',
-        video_base_dir='datasets/train/videos'
+        video_base_dir='datasets/train/videos',
+        save_mouth=False
     ):
         self.filename_log = []
         self.num_face_log = []
@@ -383,8 +452,11 @@ class NeuralFaceExtract(object):
             dataset = datasets.Dataset(basedir=basedir)
             filenames = dataset.all_videos[:].tolist()
 
-        filepaths = []
+        save_image_map = functools.partial(
+            self.save_image_map, save_mouth=save_mouth
+        )
 
+        filepaths = []
         for k in range(len(filenames)):
             filename = filenames[k]
             filepath = f'{video_base_dir}/{filename}'
@@ -394,7 +466,7 @@ class NeuralFaceExtract(object):
         # input(f'IN FILEPATHS {filepaths}')
         self.process_filepaths(
             filepaths, every_n_frames=every_n_frames,
-            batch_size=16, callback=self.callback,
+            batch_size=16, callback=save_image_map,
             export_size=export_size, skip_detect=skip_detect,
             ignore_detect=ignore_detect, img_filter=img_filter
         )

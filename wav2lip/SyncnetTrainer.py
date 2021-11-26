@@ -68,7 +68,8 @@ class SyncnetTrainer(object):
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
         mel_cache_path='saves/preprocessed/mel_cache.npy',
-        old_joon=True, dropout_p=0.0
+        old_joon=True, dropout_p=0.0, transform_image=False,
+        fcc_list=None
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -81,6 +82,7 @@ class SyncnetTrainer(object):
         self.accum_train_score = 0
         self.accum_validate_score = 0
         self.save_threshold = save_threshold
+        self.transform_image = transform_image
         self.dropout_p = dropout_p
         self.valid_p = valid_p
         self.test_p = test_p
@@ -108,7 +110,9 @@ class SyncnetTrainer(object):
                 self.model = SyncnetJoonV1()
             else:
                 print('USING JOON V2')
-                self.model = SyncnetJoon(dropout_p=dropout_p)
+                self.model = SyncnetJoon(
+                    dropout_p=dropout_p, fcc_list=fcc_list
+                )
 
             if mel_step_size is None:
                 mel_step_size = 20
@@ -149,7 +153,8 @@ class SyncnetTrainer(object):
             face_base_dir=self.face_base_dir,
             video_base_dir=self.video_base_dir,
             audio_base_dir=self.audio_base_dir,
-            mel_cache_path=self.mel_cache_path
+            mel_cache_path=self.mel_cache_path,
+            transform_image=self.transform_image
         )
         
         if preload_path is not None:
