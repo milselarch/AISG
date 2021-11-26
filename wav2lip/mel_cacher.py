@@ -1,3 +1,5 @@
+import pandas as pd
+
 from tqdm.auto import tqdm
 from BaseDataset import BaseDataset
 from SyncnetTrainer import SyncnetTrainer
@@ -7,8 +9,13 @@ trainer = SyncnetTrainer(
     old_joon=False, pred_ratio=1.0, is_checkpoint=False
 )
 
+df = pd.read_csv('../datasets/train.csv')
+all_filenames = df['filename'].to_numpy()
+
 trainer.dataset.load_datasets()
-face_files = trainer.dataset.allowed_filenames
+# face_files = trainer.dataset.allowed_filenames
+face_files = all_filenames
+
 audio_base_dir = '../datasets/extract/audios-flac'
 mel_cache = {}
 

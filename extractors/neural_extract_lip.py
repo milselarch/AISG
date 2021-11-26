@@ -36,8 +36,9 @@ if __name__ == '__main__':
         extractor.extract_all(
             filenames, basedir=basedir,
             video_base_dir=video_base_dir,
-            every_n_frames=1, skip_detect=10,
+            every_n_frames=1, skip_detect=5,
             export_size=256, ignore_detect=20,
+            save_mouth=True
         )
     except Exception as e:
         print(traceback.format_exc())

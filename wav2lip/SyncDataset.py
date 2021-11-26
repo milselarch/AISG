@@ -61,7 +61,7 @@ class SyncDataset(object):
         face_base_dir='../datasets/extract/mtcnn-faces',
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
-        mel_cache_path=None
+        mel_cache_path=None, transform_image=False
     ):
         assert train_workers % 2 == 0
         assert test_workers % 2 == 0
@@ -70,6 +70,7 @@ class SyncDataset(object):
         self.syncnet_mel_step_size = mel_step_size
         self.train_workers = train_workers
         self.test_workers = test_workers
+        self.transform_image = transform_image
         self.use_joon = use_joon
 
         self.transform = transforms.Compose([
@@ -130,7 +131,8 @@ class SyncDataset(object):
             syncnet_mel_step_size=self.syncnet_mel_step_size,
             face_base_dir=self.face_base_dir,
             video_base_dir=self.video_base_dir,
-            audio_base_dir=self.audio_base_dir
+            audio_base_dir=self.audio_base_dir,
+            transform_image=self.transform_image
         )
 
     def make_data_loader(self, file_map=None):
