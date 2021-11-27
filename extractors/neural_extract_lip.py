@@ -15,8 +15,9 @@ profile_path = f'profiles/neural-extract-{stamp}.profile'
 basedir = '../datasets'
 video_base_dir = f'{basedir}/train/videos'
 
+# 3aa2ed22b0182ad2.mp4:  17%|█▋        | 1164/6943
 dataset = datasets.Dataset(basedir=basedir)
-filenames = dataset.all_videos[:].tolist()
+filenames = dataset.all_videos[1100:].tolist()
 # filenames = ['e39a5b7f32cac303.mp4']
 # filenames = ['7f158571c5cdcd1f.mp4']
 # filenames = ['9584bf852635aabe.mp4']
@@ -39,7 +40,7 @@ if __name__ == '__main__':
             video_base_dir=video_base_dir,
             every_n_frames=1, skip_detect=5,
             export_size=256, ignore_detect=20,
-            save_mouth=True
+            save_mouth=True, blend_displace=2
         )
     except Exception as e:
         print(traceback.format_exc())
