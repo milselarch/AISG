@@ -93,7 +93,7 @@ class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
         frame_no: int, num_faces: int, detected: bool,
-        mouth_image=None
+        mouth_image=None, blended=False
     ):
         assert len(coords) == 4
         self.image = image
@@ -104,6 +104,7 @@ class FaceImage(object):
         self.frame_no = frame_no
         self.num_faces = num_faces
         self.detected = detected
+        self.blended = blended
 
     def rescale_coords(self, rescale):
         assert rescale > 0
@@ -320,16 +321,18 @@ class FaceExtractor(object):
 
                 if type(extraction) is tuple:
                     face_crop, ratio = extraction
+                    blended = False
                 else:
                     mouth_crop = extraction.mouth_crop
                     face_crop = extraction.face_crop
+                    blended = extraction.blended
                     # ratio = extraction.ratio
 
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
                     face_no=shifted_face_no, frame_no=frame_no,
                     num_faces=num_export_faces, detected=detected,
-                    mouth_image=mouth_crop
+                    mouth_image=mouth_crop, blended=blended
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)
