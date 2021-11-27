@@ -17,13 +17,14 @@ video_base_dir = f'{basedir}/train/videos'
 
 dataset = datasets.Dataset(basedir=basedir)
 filenames = dataset.all_videos[:].tolist()
+# filenames = ['e39a5b7f32cac303.mp4']
+# filenames = ['7f158571c5cdcd1f.mp4']
 # filenames = ['9584bf852635aabe.mp4']
 # filenames = ['15131c1ca037f1f8.mp4']
 # filenames = ['0a4da6b49315507c.mp4']
 # filenames = ['a09d90703e755a13.mp4']
 # filenames = ['f45a1fd86d66e669.mp4']
 # filenames = ['a161b256a9dcd783.mp4']  # empty
-
 
 if __name__ == '__main__':
     profile = cProfile.Profile()
