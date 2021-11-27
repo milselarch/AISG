@@ -97,7 +97,7 @@ class NeuralFaceExtract(object):
         self, frames, batch_size, interval,
         skip_detect=None, ignore_detect=None, export_size=256,
         conf_threshold=0.991, make_next_detect_map=True,
-        displace_next=2
+        displace_next=1
     ):
         sub_frames = []
         sub_frame_nos = []
@@ -344,13 +344,14 @@ class NeuralFaceExtract(object):
 
     def fill_face_maps(
         self, frames, interval, batch_size, skip_detect=None,
-        ignore_detect=None, export_size=256, make_next_detect_map=True
+        ignore_detect=None, export_size=256, make_next_detect_map=True,
+        displace_next=1
     ):
         extract_result = self.extract_faces(
             frames, batch_size=batch_size, interval=interval,
             skip_detect=skip_detect, ignore_detect=ignore_detect,
             make_next_detect_map=make_next_detect_map,
-            export_size=export_size
+            export_size=export_size, displace_next=displace_next
         )
 
         frame_face_boxes = extract_result[0]
@@ -407,7 +408,8 @@ class NeuralFaceExtract(object):
     def process_filepath(
         self, filepath, every_n_frames=20, batch_size=16,
         base_dir=None, export_size=256, skip_detect=None,
-        ignore_detect=None, pbar=None, make_next_detect_map=True
+        ignore_detect=None, pbar=None, make_next_detect_map=True,
+        displace_next=1
     ):
         name = os.path.basename(filepath)
         if pbar is not None:
@@ -429,13 +431,15 @@ class NeuralFaceExtract(object):
             batch_size=batch_size, export_size=export_size,
             skip_detect=skip_detect, ignore_detect=ignore_detect,
             make_next_detect_map=make_next_detect_map,
-            filepath=filepath
+            filepath=filepath, displace_next=displace_next,
+            scale=scale
         )
 
     def process_video(
         self, video_cap, every_n_frames=20, batch_size=16,
         export_size=256, skip_detect=None, ignore_detect=None,
-        scale=1, filepath='test', make_next_detect_map=True
+        scale=1, filepath='test', make_next_detect_map=True,
+        displace_next=1
     ):
         print(f'{filepath} SCALE {scale}')
         vid_obj = loader.load_video(
@@ -459,7 +463,7 @@ class NeuralFaceExtract(object):
             fill_face_maps=functools.partial(
                 self.fill_face_maps, batch_size=batch_size,
                 make_next_detect_map=make_next_detect_map,
-                export_size=export_size
+                export_size=export_size, displace_next=displace_next
             )
         )
 
@@ -473,15 +477,9 @@ class NeuralFaceExtract(object):
         self, filepaths, callback=lambda *args, **kwargs: None,
         every_n_frames=20, batch_size=16, base_dir=None,
         export_size=256, skip_detect=None, ignore_detect=None,
-        img_filter=lambda x, f: x, make_next_detect_map=True
+        img_filter=lambda x, f: x, make_next_detect_map=True,
+        displace_next=1, delete_after=True
     ):
-        """
-        def fill_face_maps(frames, interval, skip_detect=None):
-            return self.fill_face_maps(
-                frames, interval, batch_size=batch_size,
-                skip_detect=skip_detect
-            )
-        """
         pbar = tqdm(filepaths)
 
         for filepath in pbar:
@@ -489,7 +487,8 @@ class NeuralFaceExtract(object):
                 filepath=filepath, every_n_frames=every_n_frames,
                 base_dir=base_dir, export_size=export_size,
                 skip_detect=skip_detect, ignore_detect=ignore_detect,
-                pbar=pbar, make_next_detect_map=make_next_detect_map
+                pbar=pbar, make_next_detect_map=make_next_detect_map,
+                displace_next=displace_next, batch_size=batch_size
             )
 
             callback(
@@ -497,13 +496,16 @@ class NeuralFaceExtract(object):
                 pbar=pbar, img_filter=img_filter
             )
 
-            # vid_obj.release()
-            # del vid_obj, video_cap
-            # gc.collect()
+            if delete_after:
+                del face_image_map
+                # vid_obj.release()
+                # del vid_obj, video_cap
+                gc.collect()
 
     def save_image_map(
         self, filepath, face_image_map, pbar=None,
-        img_filter=lambda x, f: x, save_mouth=False
+        img_filter=lambda x, f: x, save_mouth=False,
+        delete_after=True
     ):
         if face_image_map is None:
             print(f'VIDEO LOAD FAILED {filepath}')
@@ -561,16 +563,23 @@ class NeuralFaceExtract(object):
                 path = f'{face_dir}/{face_no}-{frame_no}.jpg'
                 im.save(path)
 
-        del face_image_map
-        gc.collect()
+        if delete_after:
+            del face_image_map
+            gc.collect()
 
     def extract_all(
         self, filenames=None, every_n_frames=20,
         export_size=256, skip_detect=None, ignore_detect=None,
         img_filter=lambda x, f: x, basedir='datasets',
         video_base_dir='datasets/train/videos',
-        save_mouth=False
+        save_mouth=False, blend_displace=1
     ):
+        if blend_displace == 0:
+            make_next_detect_map = False
+        else:
+            assert blend_displace > 0
+            make_next_detect_map = True
+
         self.filename_log = []
         self.num_face_log = []
         self.frame_log = []
@@ -586,7 +595,8 @@ class NeuralFaceExtract(object):
             filenames = dataset.all_videos[:].tolist()
 
         save_image_map = functools.partial(
-            self.save_image_map, save_mouth=save_mouth
+            self.save_image_map, save_mouth=save_mouth,
+            delete_after=False
         )
 
         filepaths = []
@@ -601,7 +611,9 @@ class NeuralFaceExtract(object):
             filepaths, every_n_frames=every_n_frames,
             batch_size=16, callback=save_image_map,
             export_size=export_size, skip_detect=skip_detect,
-            ignore_detect=ignore_detect, img_filter=img_filter
+            ignore_detect=ignore_detect, img_filter=img_filter,
+            make_next_detect_map=make_next_detect_map,
+            displace_next=blend_displace, delete_after=True
         )
 
         end_time = time.perf_counter()
