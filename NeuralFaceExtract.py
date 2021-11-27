@@ -96,7 +96,8 @@ class NeuralFaceExtract(object):
     def extract_faces(
         self, frames, batch_size, interval,
         skip_detect=None, ignore_detect=None, export_size=256,
-        conf_threshold=0.991, make_next_detect_map=True
+        conf_threshold=0.991, make_next_detect_map=True,
+        displace_next=2
     ):
         sub_frames = []
         sub_frame_nos = []
@@ -148,7 +149,7 @@ class NeuralFaceExtract(object):
                 continue
 
             try:
-                next_item = iterator[k+1]
+                next_item = iterator[k+displace_next]
             except IndexError:
                 continue
 
