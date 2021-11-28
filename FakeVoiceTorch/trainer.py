@@ -449,16 +449,9 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def sub_sample_mel(
-        mel_spec_array, max_samples=256, min_samples=128, clip_p=0
+        mel_spec_array, max_samples=256, min_samples=128
     ):
         # print('MEL ARR SHAPE', mel_spec_array.shape)
-        assert clip_p < 0.5
-        clip = int(len(mel_spec_array) * clip_p)
-        end_index = len(mel_spec_array) - clip
-
-        if len(mel_spec_array) > min_samples + 2 * clip:
-            mel_spec_array = mel_spec_array[clip:end_index]
-
         interval = math.ceil(len(mel_spec_array) / max_samples)
         interval = max(interval, 1)
         samples_taken, prev_index = 0, -1
@@ -491,11 +484,19 @@ class Trainer(BaseTrainer):
         max_samples=None, min_samples=0, clip_p=0,
         max_batch_size=None, no_grad=False
     ):
+        assert clip_p < 0.5
+
         mel_spec_array = self.load_melspectrogram(audio_arr)
+        clip = int(len(mel_spec_array) * clip_p)
+        end_index = len(mel_spec_array) - clip
+
+        if len(mel_spec_array) > min_samples + 2 * clip:
+            mel_spec_array = mel_spec_array[clip:end_index]
+
         if max_samples is not None:
             mel_spec_array = self.sub_sample_mel(
                 mel_spec_array, max_samples=max_samples,
-                min_samples=min_samples, clip_p=clip_p
+                min_samples=min_samples
             )
 
         batch_x = np.array([mel_spec_array])
