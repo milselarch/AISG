@@ -388,13 +388,16 @@ class VideoSyncPredictor(object):
         all_preds, all_labels = [], []
         face_preds_map = samples_holder.face_preds_map
 
-        for key in tqdm(face_preds_map):
+        for key in face_preds_map:
             filename, face_no = key
             predictions = face_preds_map[key]
+            np_preds = np.array(predictions)
             num_faces = num_face_map[filename]
             tag = self.get_tag(filename)
+    
+            print('')
+            print(f'predictions: {np_preds}')
 
-            print(f'predictions: {predictions}')
             self.record_preds(
                 predictions, face_no, num_faces,
                 filename=filename, tag=tag
@@ -464,6 +467,6 @@ percent fake: 0.1978021978021978
 if __name__ == '__main__':
     sync_predictor = VideoSyncPredictor()
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
-    sync_predictor.profile_infer(clip=32)
-    # sync_predictor.profile_infer()
+    # sync_predictor.profile_infer(clip=32)
+    sync_predictor.profile_infer(batch_size=32)
     # sync_predictor.profile_start()
