@@ -93,11 +93,11 @@ class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
         frame_no: int, num_faces: int, detected: bool,
-        mouth_image=None, blended=False
+        mouth_image=None, blended=False, strict=True
     ):
-        assert len(coords) == 4
-        self.image = image
+        assert not strict or (len(coords) == 4)
         self.mouth_image = mouth_image
+        self.image = image
 
         self.coords = coords
         self.face_no = face_no

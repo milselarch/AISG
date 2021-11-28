@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torchvision
 import cProfile
+import random
 import torch.optim as optim
 import python_speech_features
 import argparse
@@ -262,7 +263,7 @@ class SyncnetTrainer(object):
 
     def batch_validate(
         self, episode_no, batch_size=None, fake_p=0.5,
-        enter_eval_mode=True
+        enter_eval_mode=True, use_train_data=False
     ):
         if batch_size is None:
             batch_size = self.batch_size
@@ -275,7 +276,7 @@ class SyncnetTrainer(object):
 
         torch_batch = self.prepare_torch_batch(
             batch_size=batch_size, fake_p=fake_p,
-            is_training=False, randomize=True
+            is_training=use_train_data, randomize=True
         )
 
         with torch.no_grad():
@@ -333,11 +334,10 @@ class SyncnetTrainer(object):
 
         print(f'Loaded checkpoint from {checkpoint_path}')
 
-    def face_predict(
+    def to_torch_batch(
         self, face_samples, melspectogram, fps,
-        transpose_audio=False, to_numpy=False, use_joon=None,
-        is_raw_audio=False, predict_distance=False,
-        no_grad=True
+        transpose_audio=False, use_joon=None, is_raw_audio=False,
+        to_device=True, auto_double=True
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -382,13 +382,30 @@ class SyncnetTrainer(object):
             # print('TI', torch_img_sample.shape)
             # print('TM', torch_mel_sample.shape)
 
-        if len(img_batch) == 1:
+        if auto_double and (len(img_batch) == 1):
             print('SINGLE SAMPLE ONLY')
             img_batch = [img_batch[0], img_batch[0]]
             mel_batch = [mel_batch[0], mel_batch[0]]
 
-        t_img_batch = torch.cat(img_batch).to(self.device)
-        t_mel_batch = torch.cat(mel_batch).to(self.device)
+        if len(img_batch) == 0:
+            return None
+
+        t_img_batch = torch.cat(img_batch)
+        t_mel_batch = torch.cat(mel_batch)
+
+        if to_device:
+            t_img_batch = t_img_batch.to(self.device)
+            t_mel_batch = t_mel_batch.to(self.device)
+
+        return t_img_batch, t_mel_batch
+
+    def face_predict(
+        self, *args, to_numpy=False, predict_distance=False,
+        no_grad=True, **kwargs
+    ):
+        t_img_batch, t_mel_batch = self.to_torch_batch(
+            *args, **kwargs
+        )
 
         if predict_distance:
             is_joon_model = isinstance(self.model, SyncnetJoon)
@@ -554,6 +571,60 @@ class SyncnetTrainer(object):
         print(f'time taken: {round(time_taken, 2)}s')
         print(f'time per eps: {round(time_per_episode, 3)}s')
 
+    def validate(
+        self, episodes=10 * 1000, batch_size=None,
+        fake_p=0.5, use_train_data=False, mono_filename=False
+    ):
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        episode_no = 0
+        self.model.train(False)
+        pbar = tqdm(range(episodes))
+        batch_preds, batch_labels = [], []
+
+        while episode_no <= episodes:
+            desc = f'VA episode {episode_no}/{episodes}'
+            pbar.set_description(desc)
+            pbar.update(batch_size)
+
+            if mono_filename:
+                if use_train_data:
+                    filelist = self.dataset.train_face_files
+                else:
+                    filelist = self.dataset.test_face_files
+
+                filename = random.choice(filelist)
+            else:
+                filename = None
+
+            torch_batch = self.prepare_torch_batch(
+                batch_size=batch_size, fake_p=fake_p,
+                is_training=use_train_data, randomize=True,
+                filename=filename
+            )
+
+            with torch.no_grad():
+                t_labels, t_images, t_mels = torch_batch
+                preds = self.predict(t_mels, t_images)
+
+            np_preds = preds.detach().cpu().numpy().flatten()
+            np_labels = t_labels.detach().cpu().numpy().flatten()
+            batch_preds.append(np_preds)
+            batch_labels.append(np_labels)
+
+            episode_no += batch_size
+
+        all_preds = np.concatenate(batch_preds)
+        all_labels = np.concatenate(batch_labels)
+        me, mse, accuracy = self.get_metrics(all_preds, all_labels)
+        mean_pred = np.mean(all_preds)
+
+        print(f'accuracy: {accuracy}')
+        print(f'mean error: {me}')
+        print(f'mean squared error: {mse}')
+        print(f'average pred: {mean_pred}')
+
     @staticmethod
     def get_smooth_score(accum_score, decay, eps):
         denom = (1 - decay ** eps) / (1 - decay)
@@ -620,18 +691,25 @@ class SyncnetTrainer(object):
         self.tensorboard_started = True
 
     @staticmethod
-    def record_metrics(
-        episode_no, loss_value, np_preds, flat_labels,
-        callback
-    ):
+    def get_metrics(np_preds, np_labels):
         round_preds = np.round(np_preds)
-        matches = np.equal(round_preds, flat_labels)
+        matches = np.equal(round_preds, np_labels)
         accuracy = sum(matches) / len(matches)
 
-        errors = abs(np_preds - flat_labels)
+        errors = abs(np_preds - np_labels)
         me = np.sum(errors) / errors.size
-        squared_error = np.sum((np_preds - flat_labels) ** 2)
+        squared_error = np.sum((np_preds - np_labels) ** 2)
         mse = (squared_error / errors.size) ** 0.5
+        return me, mse, accuracy
+
+    @classmethod
+    def record_metrics(
+        cls, episode_no, loss_value, np_preds, flat_labels,
+        callback
+    ):
+        me, mse, accuracy = cls.get_metrics(
+            np_preds, flat_labels
+        )
 
         if callback is not None:
             callback(

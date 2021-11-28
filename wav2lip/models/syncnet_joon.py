@@ -19,9 +19,10 @@ class SyncnetJoon(nn.Module):
     def __init__(
         self, num_layers_in_fc_layers=1024,
         fcc_ratio=0., fcc_list=(128, 16),
-        dropout_p=0.0
+        dropout_p=0.0, num_outputs=1
     ):
         super(SyncnetJoon, self).__init__()
+        self.num_outputs = num_outputs
         self.toggle_norms = True
 
         if fcc_list is None:
@@ -131,11 +132,12 @@ class SyncnetJoon(nn.Module):
         )
 
         self.dense_layer = self.make_dense(
-            fcc_list, dropout_p=self.dropout_p
+            fcc_list, dropout_p=self.dropout_p,
+            num_outputs=self.num_outputs
         )
 
     @staticmethod
-    def make_dense(fcc_list, dropout_p=0.0):
+    def make_dense(fcc_list, dropout_p=0.0, num_outputs=1):
         if type(fcc_list) is int:
             fcc_list = (fcc_list,)
 
@@ -163,7 +165,7 @@ class SyncnetJoon(nn.Module):
 
         dense_sequential = nn.Sequential(
             *dense_layers,
-            nn.Linear(num_neurons, 1)
+            nn.Linear(num_neurons, num_outputs)
         )
 
         return dense_sequential

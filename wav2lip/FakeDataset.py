@@ -113,15 +113,12 @@ class FakeDataset(BaseDataset):
             self.fake_img_cache[k] = img_sample
             self.fake_mel_cache[k] = mel_sample
 
-    def _load_random_sample(self):
-        name = self.choose_random_name()
-        filename = f'{name}.mp4'
-        # print('FILENAME', filename)
-
+    def _choose_sample(self, filename):
         assert type(filename) is str
         current_fps = self.resolve_fps(filename)
         assert current_fps != 0
 
+        name = filename[:filename.rindex('.')]
         frame_no, window_fnames = 0, None
         image_paths = self.load_image_paths(
             name, randomize_images=True
@@ -138,6 +135,17 @@ class FakeDataset(BaseDataset):
         )
 
         return torch_imgs, torch_mels
+
+    def _load_random_sample(self):
+        return self.choose_sample()
+
+    def choose_sample(self, filename=None):
+        if filename is None:
+            name = self.choose_random_name()
+            filename = f'{name}.mp4'
+
+        # print('FILENAME', filename)
+        return self._choose_sample(filename)
 
     def _load_random_audio_sample(
         self, exclude_filename, exclude_frame_no
