@@ -134,7 +134,7 @@ class Dataset(object):
             flip = random.choice([0, 1])
 
             for fname in window_fnames:
-                img = BaseDataset.cv_loader(
+                img = BaseDataset._cv_loader(
                     fname, mirror_prob=flip
                 )
 
