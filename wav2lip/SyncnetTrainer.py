@@ -23,6 +23,8 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
 import torchvision
+import cProfile
+import random
 import torch.optim as optim
 import python_speech_features
 import argparse
@@ -66,7 +68,9 @@ class SyncnetTrainer(object):
         face_base_dir='../datasets/extract/mtcnn-sync',
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
-        old_joon=True
+        mel_cache_path='saves/preprocessed/mel_cache.npy',
+        old_joon=True, dropout_p=0.0, transform_image=False,
+        fcc_list=None
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -79,6 +83,8 @@ class SyncnetTrainer(object):
         self.accum_train_score = 0
         self.accum_validate_score = 0
         self.save_threshold = save_threshold
+        self.transform_image = transform_image
+        self.dropout_p = dropout_p
         self.valid_p = valid_p
         self.test_p = test_p
 
@@ -92,6 +98,7 @@ class SyncnetTrainer(object):
         self.face_base_dir = face_base_dir
         self.video_base_dir = video_base_dir
         self.audio_base_dir = audio_base_dir
+        self.mel_cache_path = mel_cache_path
 
         torch.backends.cudnn.benchmark = True
         self.use_joon = use_joon
@@ -100,13 +107,18 @@ class SyncnetTrainer(object):
 
         if use_joon:
             if old_joon:
+                print('USING JOON V1')
                 self.model = SyncnetJoonV1()
             else:
-                self.model = SyncnetJoon()
+                print('USING JOON V2')
+                self.model = SyncnetJoon(
+                    dropout_p=dropout_p, fcc_list=fcc_list
+                )
 
             if mel_step_size is None:
                 mel_step_size = 20
         else:
+            print('USING OLD SYNCNET')
             self.model = SyncNet(self.syncnet_T)
             if mel_step_size is None:
                 mel_step_size = 16
@@ -117,11 +129,14 @@ class SyncnetTrainer(object):
         else:
             self.device = torch.device("cpu")
 
-        # self.criterion = nn.CrossEntropyLoss()
-        self.criterion = nn.BCELoss()
-        self.params = [
+        grad_params = [
             p for p in self.model.parameters() if p.requires_grad
         ]
+
+        # self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.BCELoss()
+        self.params = list(self.model.parameters())
+
         self.optimizer = optim.Adam(
             self.params, lr=hparams.initial_learning_rate,
             betas=(0.9, 0.999), eps=1e-08
@@ -138,7 +153,9 @@ class SyncnetTrainer(object):
             mel_step_size=mel_step_size, use_joon=self.use_joon,
             face_base_dir=self.face_base_dir,
             video_base_dir=self.video_base_dir,
-            audio_base_dir=self.audio_base_dir
+            audio_base_dir=self.audio_base_dir,
+            mel_cache_path=self.mel_cache_path,
+            transform_image=self.transform_image
         )
         
         if preload_path is not None:
@@ -146,6 +163,9 @@ class SyncnetTrainer(object):
                 self.load_checkpoint(preload_path, strict=strict)
             else:
                 self.load_model(preload_path)
+
+    def make_data_loader(self, *args, **kwargs):
+        return self.dataset.make_data_loader(*args, **kwargs)
 
     def start_dataset_workers(self):
         if not self.dataset.loaded:
@@ -160,6 +180,30 @@ class SyncnetTrainer(object):
             self.model.eval()
 
         print(f'PRELOADED SYNCNET FROM {model_path}')
+
+    def load_parameters(self, model_path):
+        state = self.model.state_dict()
+        loaded_state = torch.load(model_path)
+
+        for name, param in loaded_state.items():
+            orig_name = name
+
+            if name not in state:
+                name = name.replace("module.", "")
+
+                if name not in state:
+                    print("%s is not in the model." % orig_name)
+                    continue
+
+            if state[name].size() != loaded_state[orig_name].size():
+                print(
+                    f'Wrong parameter length: {orig_name}'
+                    f'model: {self_state[name].size()},'
+                    f'loaded: {loaded_state[orig_name].size()}'
+                )
+                continue
+
+            state[name].copy_(param)
 
     def cosine_loss(self, audio_embed, face_embed, labels):
         d = nn.functional.cosine_similarity(audio_embed, face_embed)
@@ -192,18 +236,12 @@ class SyncnetTrainer(object):
 
         self.model.train()
 
-        batch = self.dataset.prepare_batch(
+        torch_batch = self.prepare_torch_batch(
             batch_size=batch_size, fake_p=fake_p,
             is_training=True, randomize=True
         )
 
-        torch_batch = self.dataset.torchify_batch(*batch)
         t_labels, t_images, t_mels = torch_batch
-
-        t_mels = t_mels.to(self.device)
-        t_images = t_images.to(self.device)
-        t_labels = t_labels.to(self.device).detach()
-        # print('INPUTS', t_mels.shape, t_images.shape)
         preds = self.predict(t_mels, t_images)
 
         self.optimizer.zero_grad()
@@ -225,22 +263,10 @@ class SyncnetTrainer(object):
 
     def batch_validate(
         self, episode_no, batch_size=None, fake_p=0.5,
-        enter_eval_mode=True
+        enter_eval_mode=True, use_train_data=False
     ):
         if batch_size is None:
             batch_size = self.batch_size
-
-        batch = self.dataset.prepare_batch(
-            batch_size=batch_size, fake_p=fake_p,
-            is_training=False, randomize=True
-        )
-
-        torch_batch = self.dataset.torchify_batch(*batch)
-        t_labels, t_images, t_mels = torch_batch
-
-        t_mels = t_mels.to(self.device)
-        t_images = t_images.to(self.device)
-        t_labels = t_labels.to(self.device).detach()
 
         # self.optimizer.zero_grad()
         if enter_eval_mode:
@@ -248,7 +274,13 @@ class SyncnetTrainer(object):
         else:
             self.model.train(True)
 
+        torch_batch = self.prepare_torch_batch(
+            batch_size=batch_size, fake_p=fake_p,
+            is_training=use_train_data, randomize=True
+        )
+
         with torch.no_grad():
+            t_labels, t_images, t_mels = torch_batch
             preds = self.predict(t_mels, t_images)
             loss = self.criterion(preds, t_labels)
             loss_value = loss.item()
@@ -264,6 +296,20 @@ class SyncnetTrainer(object):
         )
 
         return score
+
+    def prepare_batch(self, *args, **kwargs):
+        return self.dataset.prepare_batch(*args, **kwargs)
+
+    def prepare_torch_batch(self, *args, **kwargs):
+        batch = self.prepare_batch(*args, **kwargs)
+        torch_batch = self.dataset.torchify_batch(*batch)
+        t_labels, t_images, t_mels = torch_batch
+
+        t_mels = t_mels.to(self.device)
+        t_images = t_images.to(self.device)
+        t_labels = t_labels.to(self.device).detach()
+
+        return t_labels, t_images, t_mels
 
     def load_checkpoint(
         self, checkpoint_path, reset_optimizer=False,
@@ -288,11 +334,10 @@ class SyncnetTrainer(object):
 
         print(f'Loaded checkpoint from {checkpoint_path}')
 
-    def face_predict(
+    def to_torch_batch(
         self, face_samples, melspectogram, fps,
-        transpose_audio=False, to_numpy=False, use_joon=None,
-        is_raw_audio=False, predict_distance=False,
-        no_grad=True
+        transpose_audio=False, use_joon=None, is_raw_audio=False,
+        to_device=True, auto_double=True
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -337,13 +382,30 @@ class SyncnetTrainer(object):
             # print('TI', torch_img_sample.shape)
             # print('TM', torch_mel_sample.shape)
 
-        if len(img_batch) == 1:
+        if auto_double and (len(img_batch) == 1):
             print('SINGLE SAMPLE ONLY')
             img_batch = [img_batch[0], img_batch[0]]
             mel_batch = [mel_batch[0], mel_batch[0]]
 
-        torch_img_batch = torch.cat(img_batch).to(self.device)
-        torch_mel_batch = torch.cat(mel_batch).to(self.device)
+        if len(img_batch) == 0:
+            return None
+
+        t_img_batch = torch.cat(img_batch)
+        t_mel_batch = torch.cat(mel_batch)
+
+        if to_device:
+            t_img_batch = t_img_batch.to(self.device)
+            t_mel_batch = t_mel_batch.to(self.device)
+
+        return t_img_batch, t_mel_batch
+
+    def face_predict(
+        self, *args, to_numpy=False, predict_distance=False,
+        no_grad=True, **kwargs
+    ):
+        t_img_batch, t_mel_batch = self.to_torch_batch(
+            *args, **kwargs
+        )
 
         if predict_distance:
             is_joon_model = isinstance(self.model, SyncnetJoon)
@@ -353,11 +415,13 @@ class SyncnetTrainer(object):
         else:
             predict = self.predict
 
+        self.model.eval()
+
         if no_grad:
             with torch.no_grad():
-                predictions = predict(torch_mel_batch, torch_img_batch)
+                predictions = predict(t_mel_batch, t_img_batch)
         else:
-            predictions = predict(torch_mel_batch, torch_img_batch)
+            predictions = predict(t_mel_batch, t_img_batch)
 
         predictions = predictions.detach()
 
@@ -414,6 +478,25 @@ class SyncnetTrainer(object):
 
         return preds
 
+    def ptrain(
+        self, *args, profile_dir='saves/profiles', **kwargs
+    ):
+        stamp = self.make_date_stamp()
+        assert os.path.isdir(profile_dir)
+        profile_path = f'{profile_dir}/sync-train-{stamp}.profile'
+        profile = cProfile.Profile()
+        profile.enable()
+
+        try:
+            self.train(*args, **kwargs)
+        except Exception as e:
+            print('TRAINING FAILED')
+            raise e
+        finally:
+            profile.disable()
+            profile.dump_stats(profile_path)
+            print(f'profile saved to {profile_path}')
+
     def train(
         self, episodes=10 * 1000, batch_size=None,
         fake_p=0.5
@@ -465,7 +548,6 @@ class SyncnetTrainer(object):
             pbar.set_description(desc)
             pbar.update(batch_size)
             episode_no += batch_size
-            time.sleep(0.1)
 
             # at_checkpoint = episode_no % self.save_best_every == 0
             episodes_past = episode_no - last_checkpoint
@@ -488,6 +570,60 @@ class SyncnetTrainer(object):
         time_per_episode = time_taken / episode_no
         print(f'time taken: {round(time_taken, 2)}s')
         print(f'time per eps: {round(time_per_episode, 3)}s')
+
+    def validate(
+        self, episodes=10 * 1000, batch_size=None,
+        fake_p=0.5, use_train_data=False, mono_filename=False
+    ):
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        episode_no = 0
+        self.model.train(False)
+        pbar = tqdm(range(episodes))
+        batch_preds, batch_labels = [], []
+
+        while episode_no <= episodes:
+            desc = f'VA episode {episode_no}/{episodes}'
+            pbar.set_description(desc)
+            pbar.update(batch_size)
+
+            if mono_filename:
+                if use_train_data:
+                    filelist = self.dataset.train_face_files
+                else:
+                    filelist = self.dataset.test_face_files
+
+                filename = random.choice(filelist)
+            else:
+                filename = None
+
+            torch_batch = self.prepare_torch_batch(
+                batch_size=batch_size, fake_p=fake_p,
+                is_training=use_train_data, randomize=True,
+                filename=filename
+            )
+
+            with torch.no_grad():
+                t_labels, t_images, t_mels = torch_batch
+                preds = self.predict(t_mels, t_images)
+
+            np_preds = preds.detach().cpu().numpy().flatten()
+            np_labels = t_labels.detach().cpu().numpy().flatten()
+            batch_preds.append(np_preds)
+            batch_labels.append(np_labels)
+
+            episode_no += batch_size
+
+        all_preds = np.concatenate(batch_preds)
+        all_labels = np.concatenate(batch_labels)
+        me, mse, accuracy = self.get_metrics(all_preds, all_labels)
+        mean_pred = np.mean(all_preds)
+
+        print(f'accuracy: {accuracy}')
+        print(f'mean error: {me}')
+        print(f'mean squared error: {mse}')
+        print(f'average pred: {mean_pred}')
 
     @staticmethod
     def get_smooth_score(accum_score, decay, eps):
@@ -555,18 +691,25 @@ class SyncnetTrainer(object):
         self.tensorboard_started = True
 
     @staticmethod
-    def record_metrics(
-        episode_no, loss_value, np_preds, flat_labels,
-        callback
-    ):
+    def get_metrics(np_preds, np_labels):
         round_preds = np.round(np_preds)
-        matches = np.equal(round_preds, flat_labels)
+        matches = np.equal(round_preds, np_labels)
         accuracy = sum(matches) / len(matches)
 
-        errors = abs(np_preds - flat_labels)
+        errors = abs(np_preds - np_labels)
         me = np.sum(errors) / errors.size
-        squared_error = np.sum((np_preds - flat_labels) ** 2)
+        squared_error = np.sum((np_preds - np_labels) ** 2)
         mse = (squared_error / errors.size) ** 0.5
+        return me, mse, accuracy
+
+    @classmethod
+    def record_metrics(
+        cls, episode_no, loss_value, np_preds, flat_labels,
+        callback
+    ):
+        me, mse, accuracy = cls.get_metrics(
+            np_preds, flat_labels
+        )
 
         if callback is not None:
             callback(

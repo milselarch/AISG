@@ -34,6 +34,7 @@ import torch
 import os, random, cv2, argparse
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
+import torch.utils.data as data_utils
 import pandas as pd
 import numpy as np
 
@@ -43,7 +44,7 @@ from torch import optim
 from glob import glob
 from PIL import Image, ImageOps
 from torchvision import transforms
-from torch.utils import data as data_utils
+from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from os.path import dirname, join, basename, isfile
 from multiprocessing import Process, Manager, Queue
@@ -58,9 +59,10 @@ class SyncDataset(object):
         self, seed=32, train_size=0.9, load=False,
         mel_step_size=16, syncnet_T=5, train_workers=0,
         test_workers=0, use_joon=False,
-        face_base_dir='../datasets-local/mtcnn-faces',
+        face_base_dir='../datasets/extract/mtcnn-faces',
         video_base_dir='../datasets/train/videos',
-        audio_base_dir='../datasets-local/audios-flac'
+        audio_base_dir='../datasets/extract/audios-flac',
+        mel_cache_path=None, transform_image=False
     ):
         assert train_workers % 2 == 0
         assert test_workers % 2 == 0
@@ -69,6 +71,7 @@ class SyncDataset(object):
         self.syncnet_mel_step_size = mel_step_size
         self.train_workers = train_workers
         self.test_workers = test_workers
+        self.transform_image = transform_image
         self.use_joon = use_joon
 
         self.transform = transforms.Compose([
@@ -85,6 +88,7 @@ class SyncDataset(object):
         self.face_base_dir = face_base_dir
         self.video_base_dir = video_base_dir
         self.audio_base_dir = audio_base_dir
+        self.mel_cache_path = mel_cache_path
 
         self.train_size = train_size
         self.seed = seed
@@ -108,24 +112,59 @@ class SyncDataset(object):
         if load:
             self.load()
 
-    def start_data_loaders(self, pin_memory=True, log_on_load=True):
-        train_queue = mp.Queue()
-        for k in range(self.train_workers):
-            train_queue.put(k)
+    def start_mel_cache(self):
+        if self.mel_cache is not None:
+            return False
 
         if (self.train_workers == 0) and (self.test_workers == 0):
             self.mel_cache = MelCache()
+            if self.mel_cache_path is not None:
+                self.mel_cache.preload(self.mel_cache_path)
         else:
             self.mel_cache = None
 
-        base_kwargs = kwargify(
+        return True
+
+    def _make_base_kwargs(self, log_on_load=False):
+        return kwargify(
             log_on_load=log_on_load, mel_cache=self.mel_cache,
             face_map=self.face_map, use_joon=self.use_joon,
             syncnet_mel_step_size=self.syncnet_mel_step_size,
             face_base_dir=self.face_base_dir,
             video_base_dir=self.video_base_dir,
-            audio_base_dir=self.audio_base_dir
+            audio_base_dir=self.audio_base_dir,
+            transform_image=self.transform_image
         )
+
+    def make_data_loader(
+        self, file_map=None, mel_cache=True
+    ):
+        if file_map is None:
+            file_map = self.train_face_files
+
+        if mel_cache is True:
+            self.start_mel_cache()
+        elif mel_cache is not None:
+            assert isinstance(mel_cache, MelCache)
+            self.mel_cache = mel_cache
+
+        base_kwargs = self._make_base_kwargs()
+
+        dataset = RealDataset(file_map, **base_kwargs)
+        dataloader = data_utils.DataLoader(
+            dataset, batch_size=None, num_workers=0,
+            pin_memory=False
+        )
+
+        return dataset, dataloader
+
+    def start_data_loaders(self, pin_memory=True, log_on_load=True):
+        train_queue = mp.Queue()
+        for k in range(self.train_workers):
+            train_queue.put(k)
+
+        self.start_mel_cache()
+        base_kwargs = self._make_base_kwargs(log_on_load)
         loader_kwargs = kwargify(
             batch_size=None,
             num_workers=self.test_workers // 2,
@@ -246,17 +285,19 @@ class SyncDataset(object):
         self.face_map = face_map
 
     def prepare_batch(
-        self, batch_size, fake_p=0.5,
-        is_training=True, randomize=True
+        self, batch_size, fake_p=0.5, is_training=True,
+        randomize=True, filename=None
     ):
         fake_count = int(batch_size * fake_p)
         real_count = batch_size - fake_count
 
         real_images, real_mels = self.load_samples(
-            0, real_count, is_training=is_training
+            0, real_count, is_training=is_training,
+            filename=filename
         )
         fake_images, fake_mels = self.load_samples(
-            1, fake_count, is_training=is_training
+            1, fake_count, is_training=is_training,
+            filename=filename
         )
 
         mels = real_mels + fake_mels
@@ -265,6 +306,8 @@ class SyncDataset(object):
 
         if randomize:
             indexes = np.arange(batch_size)
+            np.random.shuffle(indexes)
+
             images = self.reorder(images, indexes)
             labels = self.reorder(labels, indexes)
             mels = self.reorder(mels, indexes)
@@ -279,12 +322,16 @@ class SyncDataset(object):
 
         return new_items
 
-    def load_samples(self, label, num_samples, is_training=True):
+    def load_samples(
+        self, label, num_samples, filename=None,
+        is_training=True
+    ):
         mel_samples, img_samples = [], []
 
         for k in range(num_samples):
-            sample = self.load_sample(
-                label, is_training=is_training
+            sample = self._load_sample(
+                label, is_training=is_training,
+                filename=filename
             )
             torch_img, torch_mel = sample
             img_samples.append(torch_img)
@@ -292,7 +339,7 @@ class SyncDataset(object):
 
         return img_samples, mel_samples
 
-    def load_sample(self, label, is_training=True):
+    def _load_sample(self, label, filename=None, is_training=True):
         assert label in (0, 1)
         assert type(is_training) is bool
         assert self.loaded
@@ -309,11 +356,12 @@ class SyncDataset(object):
                 dataset = self.test_fake_dataset
 
         assert dataset is not None
+        if isinstance(dataset, DataLoader):
+            dataset = dataset.dataset
 
-        for sample in dataset:
-            assert sample is not None
-            torch_img, torch_mel = sample
-            return torch_img, torch_mel
+        sample = dataset.choose_sample(filename=filename)
+        torch_img, torch_mel = sample
+        return torch_img, torch_mel
 
     @staticmethod
     def torchify_batch(labels, images, mels):
@@ -344,7 +392,7 @@ class SyncDataset(object):
 
     @staticmethod
     def cv_loader(*args, **kwargs):
-        return BaseDataset.cv_loader(*args, **kwargs)
+        return BaseDataset._cv_loader(*args, **kwargs)
 
     @staticmethod
     def load_cct(*args, **kwargs):
@@ -378,32 +426,15 @@ class SyncDataset(object):
 
         return batch_x
 
-    @classmethod
+    @staticmethod
     def batch_images_joon(
-        cls, images, mirror_prob=0.5, torchify=True, size=224
+        images, mirror_prob=0.5, torchify=True, size=224,
+        transform_image=None
     ):
-        window = []
-        if random.random() < mirror_prob:
-            flip = 1
-        else:
-            flip = 0
-
-        for image in images:
-            image = cls.cv_loader(
-                image, mirror_prob=flip, bottom_half=False,
-                size=size
-            )
-            window.append(image)
-
-        im = np.stack(window, axis=3)
-        im = np.expand_dims(im, axis=0)
-        im_batch = np.transpose(im, (0, 3, 4, 1, 2))
-
-        if torchify:
-            im_batch = im_batch.astype(float)
-            im_batch = torch.from_numpy(im_batch).float()
-
-        return im_batch
+        return BaseDataset.batch_image_window_joon(
+            images, mirror_prob=mirror_prob, torchify=torchify,
+            size=size, transform_image=transform_image
+        )
 
     def resolve_fps(self, filename):
         if filename not in self.fps_cache:

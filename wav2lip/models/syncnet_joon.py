@@ -18,14 +18,21 @@ def load(filename):
 class SyncnetJoon(nn.Module):
     def __init__(
         self, num_layers_in_fc_layers=1024,
-        fcc_ratio=0., fcc_list=(128, 16)
+        fcc_ratio=0., fcc_list=(128, 16),
+        dropout_p=0.0, num_outputs=1
     ):
         super(SyncnetJoon, self).__init__()
+        self.num_outputs = num_outputs
+        self.toggle_norms = True
+
+        if fcc_list is None:
+            fcc_list = (128, 16)
 
         self.__nFeatures__ = 24
         self.__nChs__ = 32
         self.__midChs__ = 32
 
+        self.dropout_p = dropout_p
         self.fcc_ratio = fcc_ratio
         self.train_var = BooleanVar(True)
 
@@ -124,37 +131,56 @@ class SyncnetJoon(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.dense_layer = self.make_dense(fcc_list)
+        self.dense_layer = self.make_dense(
+            fcc_list, dropout_p=self.dropout_p,
+            num_outputs=self.num_outputs
+        )
 
     @staticmethod
-    def make_dense(fcc_list):
+    def make_dense(fcc_list, dropout_p=0.0, num_outputs=1):
         if type(fcc_list) is int:
             fcc_list = (fcc_list,)
 
         num_neurons = fcc_list[0]
-        dense_layers = []
+        dense_layers = [
+            nn.Linear(2048, fcc_list[0]),
+        ]
+
+        if dropout_p > 0.0:
+            dense_layers.append(nn.Dropout(
+                dropout_p
+            ))
+
+        dense_layers.append(nn.ReLU())
 
         for k in range(1, len(fcc_list)):
             num_neurons = fcc_list[k]
             prev_neurons = fcc_list[k-1]
-            dense_layers.extend([
-                nn.Linear(prev_neurons, num_neurons),
-                nn.ReLU()
-            ])
+            dense_layers.append(nn.Linear(prev_neurons, num_neurons))
+
+            if dropout_p > 0.0:
+                dense_layers.append(nn.Dropout(dropout_p))
+
+            dense_layers.append(nn.ReLU())
 
         dense_sequential = nn.Sequential(
-            nn.Linear(2048, fcc_list[0]),
-            nn.ReLU(),
             *dense_layers,
-            nn.Linear(num_neurons, 1)
+            nn.Linear(num_neurons, num_outputs)
         )
 
         return dense_sequential
 
+    def disable_norm_toggle(self):
+        self.toggle_norms = False
+        self.train_var.set(True)
+
     @overrides
     def train(self, mode: bool = True):
         super().train(mode)
-        self.train_var.set(mode)
+        if self.toggle_norms:
+            self.train_var.set(mode)
+        else:
+            self.train_var.set(True)
 
     def forward(self, audio_sequences, face_sequences):
         aud_out = self.forward_aud(audio_sequences)

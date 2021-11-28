@@ -21,3 +21,5 @@ saves/*
 .Trash-*
 .Trash-1000/
 pretrained/*
+temp/
+temp/*

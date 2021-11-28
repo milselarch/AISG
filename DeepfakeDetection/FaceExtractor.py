@@ -92,9 +92,11 @@ class Area(object):
 class FaceImage(object):
     def __init__(
         self, image, coords: tuple, face_no: int,
-        frame_no: int, num_faces: int, detected: bool
+        frame_no: int, num_faces: int, detected: bool,
+        mouth_image=None, blended=False, strict=True
     ):
-        assert len(coords) == 4
+        assert not strict or (len(coords) == 4)
+        self.mouth_image = mouth_image
         self.image = image
 
         self.coords = coords
@@ -102,6 +104,7 @@ class FaceImage(object):
         self.frame_no = frame_no
         self.num_faces = num_faces
         self.detected = detected
+        self.blended = blended
 
     def rescale_coords(self, rescale):
         assert rescale > 0
@@ -313,13 +316,23 @@ class FaceExtractor(object):
 
                 face_box = (left, top, right, bottom)
                 face_key = (frame_no, face_box)
-                face_crop, ratio = face_crop_map[face_key]
+                extraction = face_crop_map[face_key]
+                mouth_crop = None
+
+                if type(extraction) is tuple:
+                    face_crop, ratio = extraction
+                    blended = False
+                else:
+                    mouth_crop = extraction.mouth_crop
+                    face_crop = extraction.face_crop
+                    blended = extraction.blended
+                    # ratio = extraction.ratio
 
                 face_image = FaceImage(
                     image=face_crop, coords=coords,
                     face_no=shifted_face_no, frame_no=frame_no,
-                    num_faces=num_export_faces,
-                    detected=detected
+                    num_faces=num_export_faces, detected=detected,
+                    mouth_image=mouth_crop, blended=blended
                 )
 
                 face_image.rescale_coords(1.0 / coords_scale)

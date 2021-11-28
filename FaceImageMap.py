@@ -22,6 +22,10 @@ class FaceImageMap(object):
         name = self.__class__.__name__
         return f'{name}({repr(self.face_image_map)})'
 
+    @property
+    def face_nos(self):
+        return list(self.face_image_map.keys())
+
     def get_detected_frames(self, face_no):
         face_frames = self.get_face_frames(face_no)
         face_samples = {}

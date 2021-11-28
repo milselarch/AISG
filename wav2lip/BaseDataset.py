@@ -6,12 +6,16 @@ try:
     import audio
 
     from FaceAnalysis import FaceCluster
+    from FaceImageMap import FaceImageMap
+    from DeepfakeDetection.FaceExtractor import FaceImage
     from hparams import hparams
 except ModuleNotFoundError:
     from . import ParentImport
     from . import audio
 
     from ..FaceAnalysis import FaceCluster
+    from ..FaceImageMap import FaceImageMap
+    from .DeepfakeDetection.FaceExtractor import FaceImage
     from .hparams import hparams
 
 import os
@@ -29,6 +33,8 @@ import re
 from tqdm.auto import tqdm
 from torch.utils.data import IterableDataset
 from datetime import datetime as Datetime
+from torch.utils import data as data_utils
+from torchvision import transforms
 
 
 class MelCache(object):
@@ -60,9 +66,21 @@ class MelCache(object):
     def __len__(self):
         return len(self.cache)
 
+    def preload(self, mel_cache_path, use_joon=True):
+        print(f'LOADING MEL CACHE: {mel_cache_path}')
+
+        file_obj = open(mel_cache_path, 'rb')
+        preprocessed = np.load(file_obj, allow_pickle=True)
+        self.cache = preprocessed[()]
+
+        if use_joon and (self.cache['cache_type'] != 'cct'):
+            raise ValueError('NOT USING JOON')
 
 class BaseDataset(object):
     __ID = 0
+    transform_image = transforms.Normalize(
+        [0.5] * 3, [0.5] * 3
+    )
 
     def __init__(
         self, file_map, syncnet_T=5, syncnet_mel_step_size=16,
@@ -74,7 +92,7 @@ class BaseDataset(object):
         labels_path='../datasets/train.csv',
         detect_path='../stats/mtcnn/labelled-mtcnn.csv',
         log_on_load=False, length=sys.maxsize, face_map=None,
-        mel_cache=None, use_joon=False
+        mel_cache=None, use_joon=False, transform_image=False
     ):
         super(BaseDataset).__init__()
         print('NEW DATASET')
@@ -105,6 +123,7 @@ class BaseDataset(object):
 
         self.use_joon = use_joon
         self.log_on_load = log_on_load
+        self.transform_image = transform_image
         self.talker_face_map = None
 
         if type(file_map) in (str, list, np.ndarray):
@@ -182,7 +201,7 @@ class BaseDataset(object):
         file_map = {}
         print(f'FOLDERS FOUND', len(folders))
 
-        for folder in folders:
+        for folder in tqdm(folders):
             if folder.endswith('.mp4'):
                 folder = folder[:folder.rindex('.')]
 
@@ -291,20 +310,35 @@ class BaseDataset(object):
         if self.log_on_load:
             print(f'LOAD AUDIO [{self.name}] {filename} {status}')
 
-        assert '.' not in name
-        audio_path = f'{self.audio_base_dir}/{name}.flac'
-        wav = audio.load_wav(audio_path, sample_rate)
-
-        if not self.use_joon:
-            orig_mel = audio.melspectrogram(wav).T
-        else:
-            orig_mel = self.load_cct(
-                wav, sample_rate=sample_rate,
-                torchify=False
-            )
+        orig_mel = self.load_audio_file(
+            name, audio_base_dir=self.audio_base_dir,
+            sample_rate=sample_rate, use_joon=self.use_joon
+        )
 
         if cache_result:
             self.mel_cache[name] = orig_mel
+
+        return orig_mel
+
+    @classmethod
+    def load_audio_file(
+        cls, name, audio_base_dir, sample_rate=None,
+        use_joon=True
+    ):
+        if sample_rate is None:
+            sample_rate = hparams.sample_rate
+
+        assert '.' not in name
+        audio_path = f'{audio_base_dir}/{name}.flac'
+        wav = audio.load_wav(audio_path, sample_rate)
+
+        if not use_joon:
+            orig_mel = audio.melspectrogram(wav).T
+        else:
+            orig_mel = cls.load_cct(
+                wav, sample_rate=sample_rate,
+                torchify=False
+            )
 
         return orig_mel
 
@@ -321,6 +355,28 @@ class BaseDataset(object):
         name = base_filename[:base_filename.index('.')]
         face_no, frame_no = [int(x) for x in name.split('-')]
         return face_no, frame_no
+
+    @classmethod
+    def filter_image_paths(
+        cls, image_paths, target_frame_no=None, target_face_no=None,
+        ensure_single=False
+    ):
+        target_image_paths = []
+
+        for image_path in image_paths:
+            face_no, frame_no = cls.extract_frame(image_path)
+
+            if frame_no != target_frame_no:
+                if target_face_no is not None:
+                    continue
+            elif face_no != target_face_no:
+                if target_face_no is not None:
+                    continue
+
+            target_image_paths.append(image_path)
+
+        assert not ensure_single or (len(target_image_paths) == 1)
+        return target_image_paths
 
     def get_window(self, image_path):
         dirpath = os.path.dirname(image_path)
@@ -342,10 +398,15 @@ class BaseDataset(object):
             return self.batch_image_window_wav2lip(*args, **kwargs)
         else:
             return self.batch_image_window_joon(*args, **kwargs)
-
+    
+    @classmethod
     def batch_image_window_joon(
-        self, images, mirror_prob=0.5, torchify=True, size=224
+        cls, images, mirror_prob=0.5, size=224, torchify=True,
+        transform_image=None
     ):
+        if transform_image is None:
+            transform_image = cls.transform_image
+
         window = []
         if random.random() < mirror_prob:
             flip = 1
@@ -354,7 +415,7 @@ class BaseDataset(object):
 
         for image in images:
             try:
-                image = self.cv_loader(
+                image = cls._cv_loader(
                     image, mirror_prob=flip, size=size,
                     assert_square=True, bottom_half=False
                 )
@@ -362,15 +423,17 @@ class BaseDataset(object):
                 print('CV LOAD FAILED')
                 raise e
 
-            window.append(image)
+            t_image = torch.FloatTensor(image)
+            t_image = torch.permute(t_image, (2, 0, 1))
+            if transform_image:
+                t_image = transform_image(t_image)
 
-        im = np.stack(window, axis=3)
-        im = np.expand_dims(im, axis=0)
-        im_batch = np.transpose(im, (0, 3, 4, 1, 2))
+            t_image = t_image.unsqueeze(0)
+            window.append(t_image)
 
-        if torchify:
-            im_batch = im_batch.astype(float)
-            im_batch = torch.from_numpy(im_batch).float()
+        im_batch = torch.stack(window, dim=2)
+        if not torchify:
+            im_batch = im_batch.numpy()
 
         return im_batch
 
@@ -389,7 +452,7 @@ class BaseDataset(object):
             flip = 0
 
         for image in images:
-            image = cls.cv_loader(image, mirror_prob=flip, size=size)
+            image = cls.load_image(image, mirror_prob=flip, size=size)
             window.append(image)
 
         batch_x = np.concatenate(window, axis=2) / 255.
@@ -402,29 +465,45 @@ class BaseDataset(object):
         return batch_x
 
     @classmethod
-    def cv_loader(
-        cls, img, mirror_prob=0.5, size=None,
+    def _cv_loader(
+        cls, img, mirror_prob=0.5, size=True,
         verbose=False, bottom_half=True, assert_square=True
+    ):
+        if size is True:
+            size = hparams.img_size
+
+        return cls.load_image(
+            img, mirror_prob=mirror_prob, size=size,
+            verbose=verbose, bottom_half=bottom_half,
+            assert_square=assert_square
+        )
+
+    @classmethod
+    def load_image(
+        cls, img, size, mirror_prob=0,
+        verbose=False, bottom_half=False, assert_square=True
     ):
         if type(img) is str:
             img = cv2.imread(img)
             # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         height, width = img.shape[0], img.shape[1]
-        if size is None:
-            size = hparams.img_size
+        resize_width, resize_height = size, size
 
         if bottom_half:
             if height != width:
                 assert height == width // 2
-                img = cv2.resize(img, (size, size // 2))
+                resize_height = size // 2
             else:
                 assert not assert_square or (width == height)
-                img = cv2.resize(img, (size, size))
                 img = img[height // 2:, :]
         else:
             assert not assert_square or (width == height)
-            img = cv2.resize(img, (size, size))
+
+        if size is not None:
+            img = cv2.resize(
+                img, (resize_width, resize_height)
+            )
 
         if random.random() < mirror_prob:
             cls.m_print(verbose, 'FLIP')
@@ -548,11 +627,16 @@ class BaseDataset(object):
 
         return False
 
+    @staticmethod
+    def load_fps(filename, video_base_dir):
+        filepath = f'{video_base_dir}/{filename}'
+        cap = cv2.VideoCapture(filepath)
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        return fps
+
     def resolve_fps(self, filename):
         if filename not in self.fps_cache:
-            filepath = f'{self.video_base_dir}/{filename}'
-            cap = cv2.VideoCapture(filepath)
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            fps = self.load_fps(filename, self.video_base_dir)
             self.fps_cache[filename] = fps
 
         fps = self.fps_cache[filename]
@@ -567,3 +651,48 @@ class BaseDataset(object):
 
         frames = self.frames_cache[filename]
         return frames
+
+    def get_video_image_paths(self, filename):
+        filename = os.path.basename(filename)
+        folder = filename[:filename.rindex('.')]
+        image_paths = self.file_map[folder]
+        return image_paths
+
+    def load_face_image_map(self, filename, img_size=224):
+        filename = os.path.basename(filename)
+        fps = self.resolve_fps(filename)
+        folder = filename[:filename.rindex('.')]
+        face_image_map = {}
+
+        face_nos = []
+        image_paths = self.file_map[folder]
+
+        for image_path in image_paths:
+            face_no, frame_no = self.extract_frame(image_path)
+            if face_no not in face_nos:
+                face_nos.append(face_no)
+
+        num_faces = len(face_nos)
+
+        for image_path in image_paths:
+            face_no, frame_no = self.extract_frame(image_path)
+            detected = frame_no % 10 == 0
+            np_image = self.load_image(
+                image_path, assert_square=True, bottom_half=False,
+                mirror_prob=0, size=img_size
+            )
+
+            if face_no not in face_image_map:
+                face_image_map[face_no] = {}
+
+            face_image = FaceImage(
+                image=np_image, coords=None, strict=False,
+                face_no=face_no, frame_no=frame_no,
+                num_faces=num_faces, detected=detected
+            )
+
+            face_images = face_image_map[face_no]
+            face_images[frame_no] = face_image
+
+        face_image_map = FaceImageMap(face_image_map, fps=fps)
+        return face_image_map, num_faces

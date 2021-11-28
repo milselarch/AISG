@@ -214,3 +214,6 @@ widgetsnbextension==3.5.1
 wrapt==1.12.1
 XlsxWriter==1.1.2
 zipp==1.0.0
+
+dlib~=19.22.1
+mediapipe~=0.8.9

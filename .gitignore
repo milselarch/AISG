@@ -1,5 +1,6 @@
 *.zip
 dsets/
+datasets/*
 datasets/train/*
 datasets/train/videos
 __pycache__
@@ -18,5 +19,6 @@ __pycache__
 *.profile
 *.crdownload
 *.lock.*
+*.npy
 
 Dockerfile
