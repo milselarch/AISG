@@ -27,12 +27,14 @@ from datetime import datetime
 from tqdm.auto import tqdm
 
 class NeuralFaceExtract(object):
-    def __init__(self):
+    def __init__(self, use_cuda=True):
         self.export_dir = 'datasets-local/mtcnn-faces'
-
-        self.device = torch.device(
-            'cuda:0' if torch.cuda.is_available() else 'cpu'
-        )
+        
+        if use_cuda and torch.cuda.is_available():
+            self.device = torch.device('cuda:0')
+        else:
+            self.device = torch.device('cpu')
+            
         self.mtcnn = MTCNN(
             image_size=160, margin=0, min_face_size=50,
             thresholds=[0.6, 0.7, 0.7], factor=0.709,
