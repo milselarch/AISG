@@ -5,6 +5,7 @@ try:
 except ModuleNotFoundError:
     from .BaseDataset import BaseDataset
 
+from overrides import overrides
 from queue import Empty as QueueEmpty
 
 class RealDataset(BaseDataset):
@@ -118,30 +119,6 @@ class RealDataset(BaseDataset):
         index = random.choice(range(self.num_caches))
         cache = self.rand_cache[index]
         return cache
-
-    def load_torch_window(
-        self, filename, frame_no=None, face_no=None,
-        mirror_prob=0.5
-    ):
-        window_fnames, image_path = None, None
-
-        while window_fnames is None:
-            image_paths = self.load_image_paths(
-                filename, randomize_images=True,
-                num_samples=all
-            )
-            image_path = self.filter_image_paths(
-                image_paths, target_frame_no=frame_no,
-                target_face_no=face_no, ensure_single=False
-            )[0]
-
-            window_fnames = self.get_window(image_path)
-
-        torch_imgs = self.batch_image_window(
-            window_fnames, mirror_prob=mirror_prob
-        )
-
-        return image_path, torch_imgs
 
     def _load_random_sample(self, cache):
         current_mel = cache['mel']

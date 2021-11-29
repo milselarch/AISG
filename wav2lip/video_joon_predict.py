@@ -105,14 +105,15 @@ class FaceSamplesHolder(object):
                 [face_sample], cct, fps=fps, auto_double=False
             )
 
+            if len(self.face_samples_map[key]) == 0:
+                del self.face_samples_map[key]
+
             if torch_data is None:
                 continue
 
             t_img, t_mel = torch_data
             self.add_to_cache(key, face_sample)
-
-            if len(self.face_samples_map[key]) == 0:
-                del self.face_samples_map[key]
+            if key not in self.face_samples_map:
                 if key not in self.face_samples_cache:
                     del self.mel_cache[filename]
 
@@ -415,6 +416,8 @@ class VideoSyncPredictor(object):
         mean_pred = np.mean(all_preds)
         p_fake = sum(all_labels) / len(all_labels)
 
+        print('')
+        print('overall prediction stats')
         print(f'mean error: {me}')
         print(f'mean squared error: {mse}')
         print(f'mean pred: {mean_pred}')

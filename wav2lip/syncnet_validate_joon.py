@@ -39,5 +39,5 @@ if __name__ == '__main__':
     trainer.load_model(preload_path, eval_mode=True)
     trainer.start_dataset_workers()
     trainer.validate(
-        episodes=1000, fake_p=0, mono_filename=True
+        episodes=1000, fake_p=1, mono_filename=False
     )
