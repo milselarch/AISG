@@ -22,7 +22,6 @@ import os
 import sys
 import random
 import pandas as pd
-import torch.multiprocessing as mp
 import python_speech_features
 import numpy as np
 import torch
@@ -35,6 +34,8 @@ from torch.utils.data import IterableDataset
 from datetime import datetime as Datetime
 from torch.utils import data as data_utils
 from torchvision import transforms
+
+from multiprocessing import Process, Manager
 
 
 class MelCache(object):
@@ -91,8 +92,11 @@ class BaseDataset(object):
         face_path='../stats/all-labels.csv',
         labels_path='../datasets/train.csv',
         detect_path='../stats/mtcnn/labelled-mtcnn.csv',
+
         log_on_load=False, length=sys.maxsize, face_map=None,
-        mel_cache=None, use_joon=False, transform_image=False
+        mel_cache=None, use_joon=False, transform_image=False,
+        mp_image_cache_size=0, start_mp_image_cache=False,
+        num_image_cache_processes=1
     ):
         super(BaseDataset).__init__()
         print('NEW DATASET')
@@ -110,8 +114,14 @@ class BaseDataset(object):
         self.length = length
         self.syncnet_T = syncnet_T
         self.syncnet_mel_step_size = syncnet_mel_step_size
+        self.torch_img_cache = None
         self.mel_cache = mel_cache
         self.fps_cache = {}
+
+        self.mp_image_cache_size = mp_image_cache_size
+        self.mp_image_cache_started = False
+        self.num_image_cache_processes = num_image_cache_processes
+        self.mp_image_cache_processes = None
 
         self.face_base_dir = face_base_dir
         self.video_base_dir = video_base_dir
@@ -131,6 +141,9 @@ class BaseDataset(object):
 
         assert type(file_map) is dict
         self.file_map = file_map
+
+        if start_mp_image_cache:
+            self.start_img_cacher()
 
     def __len__(self):
         return self.length
@@ -260,6 +273,56 @@ class BaseDataset(object):
 
         return image_paths
 
+    @staticmethod
+    def kwargify(**kwargs):
+        return kwargs
+
+    def start_img_cacher(self):
+        assert self.mp_image_cache_size > 0
+        assert not self.mp_image_cache_started
+        assert self.mp_image_cache_processes is None
+
+        self.mp_image_cache_started = True
+        self.mp_image_cache_processes = []
+
+        manager = Manager()
+        self.torch_img_cache = manager.list()
+
+        for process in range(self.num_image_cache_processes):
+            process = Process(target=self._build_torch_img_cache)
+            self.mp_image_cache_processes.append(process)
+            process.daemon = True
+            process.start()
+
+    def _build_torch_img_cache(self, mirror_prob=0.5):
+        assert self.mp_image_cache_size > 0
+
+        while True:
+            image_path, torch_imgs = self.load_torch_window(
+                filename, frame_no=None, face_no=None,
+                mirror_prob=mirror_prob
+            )
+
+            image_sample = (image_path, torch_imgs)
+            if len(self.torch_img_cache) < self.mp_image_cache_size:
+                self.torch_img_cache.append(image_sample)
+
+    def fetch_torch_img_sample(self, blocking=True):
+        assert self.mp_image_cache_size > 0
+
+        while True:
+            try:
+                sample = self.torch_img_cache.pop()
+                return sample
+            except IndexError as e:
+                if not blocking:
+                    raise e
+
+            time.sleep(0.1)
+
+    def choose_sample(self, *args, **kwargs):
+        raise NotImplemented
+
     def _load_random_video(self, randomize_images=True):
         filename = self.choose_random_filename()
         filename = os.path.basename(filename)
@@ -378,6 +441,50 @@ class BaseDataset(object):
         assert not ensure_single or (len(target_image_paths) == 1)
         return target_image_paths
 
+    def load_torch_window(
+        self, filename, frame_no=None, face_no=None,
+        mirror_prob=0.5
+    ):
+        window_fnames, image_path = None, None
+
+        while window_fnames is None:
+            image_paths = self.load_image_paths(
+                filename, randomize_images=True,
+                num_samples=all
+            )
+            image_path = self.filter_image_paths(
+                image_paths, target_frame_no=frame_no,
+                target_face_no=face_no, ensure_single=False
+            )[0]
+
+            window_fnames = self.get_window(image_path)
+
+        torch_imgs = self.batch_image_window(
+            window_fnames, mirror_prob=mirror_prob
+        )
+
+        return image_path, torch_imgs
+
+    def load_torch_images(self, filename=None):
+        if self.mp_image_cache_started and (filename is None):
+            sample = self.fetch_torch_img_sample()
+            image_path, torch_imgs = sample
+
+            name = os.path.basename(image_path)
+            filename = f"{name[:name.rindex('.')]}.mp4"
+            return filename, image_path, torch_imgs
+
+        if filename is None:
+            name = self.choose_random_name()
+            filename = f'{name}.mp4'
+
+        assert type(filename) is str
+        current_fps = self.resolve_fps(filename)
+        assert current_fps != 0
+
+        image_path, torch_imgs = self.load_torch_window(filename)
+        return filename, image_path, torch_imgs
+
     def get_window(self, image_path):
         dirpath = os.path.dirname(image_path)
         face_no, frame_no = self.extract_frame(image_path)
@@ -394,10 +501,10 @@ class BaseDataset(object):
         return window_fnames
 
     def batch_image_window(self, *args, **kwargs):
-        if not self.use_joon:
-            return self.batch_image_window_wav2lip(*args, **kwargs)
-        else:
-            return self.batch_image_window_joon(*args, **kwargs)
+        assert self.use_joon
+        return self.batch_image_window_joon(
+            *args, **kwargs
+        )
     
     @classmethod
     def batch_image_window_joon(
