@@ -79,18 +79,17 @@ class RealDataset(BaseDataset):
         self, filename=None, frame_no=None, face_no=None,
         mirror_prob=0.5
     ):
-        if filename is None:
-            filename = self.choose_random_filename()
-
-        current_mel = self.load_audio(filename)
-        current_fps = self.resolve_fps(filename)
-
         while True:
-            image_path, torch_imgs = self.load_torch_window(
+            torch_img_sample = self.load_torch_images(
                 filename, frame_no=frame_no, face_no=face_no,
                 mirror_prob=mirror_prob
             )
-            frame_no = self.get_frame_no(image_path)
+
+            img_filename, img_path, torch_imgs = torch_img_sample
+            current_fps = self.resolve_fps(img_filename)
+            current_mel = self.load_audio(img_filename)
+
+            frame_no = self.get_frame_no(img_path)
             torch_mels = self.load_mel_batch(
                 current_mel, current_fps, frame_no
             )

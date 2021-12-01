@@ -95,7 +95,7 @@ class BaseDataset(object):
 
         log_on_load=False, length=sys.maxsize, face_map=None,
         mel_cache=None, use_joon=False, transform_image=False,
-        mp_image_cache_size=0, start_mp_image_cache=False,
+        mp_image_cache_size=32, start_mp_image_cache=False,
         num_image_cache_processes=1
     ):
         super(BaseDataset).__init__()
@@ -119,9 +119,10 @@ class BaseDataset(object):
         self.fps_cache = {}
 
         self.mp_image_cache_size = mp_image_cache_size
-        self.mp_image_cache_started = False
         self.num_image_cache_processes = num_image_cache_processes
-        self.mp_image_cache_processes = None
+        self.__mp_image_cache_started = False
+        self.__mp_image_cache_processes = None
+        self.__mp_image_cacher_kill = False
 
         self.face_base_dir = face_base_dir
         self.video_base_dir = video_base_dir
@@ -279,36 +280,48 @@ class BaseDataset(object):
 
     def start_img_cacher(self):
         assert self.mp_image_cache_size > 0
-        assert not self.mp_image_cache_started
-        assert self.mp_image_cache_processes is None
+        assert not self.__mp_image_cache_started
+        assert self.__mp_image_cache_processes is None
+        print('START PARALLEL IMAGE CACHE')
 
-        self.mp_image_cache_started = True
-        self.mp_image_cache_processes = []
+        self.__mp_image_cache_started = True
+        self.__mp_image_cache_processes = []
 
         manager = Manager()
         self.torch_img_cache = manager.list()
 
         for process in range(self.num_image_cache_processes):
             process = Process(target=self._build_torch_img_cache)
-            self.mp_image_cache_processes.append(process)
+            self.__mp_image_cache_processes.append(process)
             process.daemon = True
             process.start()
 
+    def kill_torch_img_cache(self):
+        self.__mp_image_cacher_kill = True
+        time.sleep(0.5)
+
     def _build_torch_img_cache(self, mirror_prob=0.5):
         assert self.mp_image_cache_size > 0
+        cache_size = self.mp_image_cache_size
 
-        while True:
+        while not self.__mp_image_cacher_kill:
+            if len(self.torch_img_cache) >= cache_size:
+                time.sleep(0.1)
+                continue
+
+            filename = self.choose_random_filename()
+            filename = os.path.basename(filename)
             image_path, torch_imgs = self.load_torch_window(
                 filename, frame_no=None, face_no=None,
                 mirror_prob=mirror_prob
             )
 
-            image_sample = (image_path, torch_imgs)
-            if len(self.torch_img_cache) < self.mp_image_cache_size:
-                self.torch_img_cache.append(image_sample)
+            image_sample = (filename, image_path, torch_imgs)
+            self.torch_img_cache.append(image_sample)
 
     def fetch_torch_img_sample(self, blocking=True):
         assert self.mp_image_cache_size > 0
+        assert not self.__mp_image_cacher_kill
 
         while True:
             try:
@@ -465,14 +478,22 @@ class BaseDataset(object):
 
         return image_path, torch_imgs
 
-    def load_torch_images(self, filename=None):
-        if self.mp_image_cache_started and (filename is None):
-            sample = self.fetch_torch_img_sample()
-            image_path, torch_imgs = sample
+    def load_mp_torch_images(self):
+        sample = self.fetch_torch_img_sample()
+        filename, image_path, torch_imgs = sample
+        # print('LOAD MP IMAGE', filename, image_path)
+        return filename, image_path, torch_imgs
 
-            name = os.path.basename(image_path)
-            filename = f"{name[:name.rindex('.')]}.mp4"
-            return filename, image_path, torch_imgs
+    def load_torch_images(
+        self, filename=None, frame_no=None, face_no=None,
+        mirror_prob=0.5
+    ):
+        if (
+            self.__mp_image_cache_started and
+            (filename is None) and (frame_no is None) and
+            (face_no is None) and (mirror_prob == 0.5)
+        ):
+            return self.load_mp_torch_images()
 
         if filename is None:
             name = self.choose_random_name()
@@ -482,7 +503,9 @@ class BaseDataset(object):
         current_fps = self.resolve_fps(filename)
         assert current_fps != 0
 
-        image_path, torch_imgs = self.load_torch_window(filename)
+        image_path, torch_imgs = self.load_torch_window(
+            filename, frame_no=frame_no, face_no=face_no
+        )
         return filename, image_path, torch_imgs
 
     def get_window(self, image_path):

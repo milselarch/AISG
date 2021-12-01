@@ -167,9 +167,9 @@ class SyncnetTrainer(object):
     def make_data_loader(self, *args, **kwargs):
         return self.dataset.make_data_loader(*args, **kwargs)
 
-    def start_dataset_workers(self):
+    def start_dataset_workers(self, *args, **kwargs):
         if not self.dataset.loaded:
-            self.dataset.load()
+            self.dataset.load(*args, **kwargs)
 
     def transform(self, image):
         return self.dataset.transform(image)
