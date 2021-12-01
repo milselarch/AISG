@@ -136,9 +136,16 @@ class SyncDataset(object):
             transform_image=self.transform_image
         )
 
-    def make_data_loader(
-        self, file_map=None, mel_cache=True
-    ):
+    def make_data_loader(self, *args, **kwargs):
+        dataset = self.make_dataset(*args, **kwargs)
+        dataloader = data_utils.DataLoader(
+            dataset, batch_size=None, num_workers=0,
+            pin_memory=False
+        )
+
+        return dataset, dataloader
+
+    def make_dataset(self, file_map=None, mel_cache=True):
         if file_map is None:
             file_map = self.train_face_files
 
@@ -149,61 +156,45 @@ class SyncDataset(object):
             self.mel_cache = mel_cache
 
         base_kwargs = self._make_base_kwargs()
-
         dataset = RealDataset(file_map, **base_kwargs)
-        dataloader = data_utils.DataLoader(
-            dataset, batch_size=None, num_workers=0,
-            pin_memory=False
-        )
+        return dataset
 
-        return dataset, dataloader
-
-    def start_data_loaders(self, pin_memory=True, log_on_load=True):
-        train_queue = mp.Queue()
-        for k in range(self.train_workers):
-            train_queue.put(k)
-
+    def start_data_loaders(
+        self, log_on_load=True, image_cache_workers=0,
+        start_train_workers=True, start_test_workers=True
+    ):
         self.start_mel_cache()
         base_kwargs = self._make_base_kwargs(log_on_load)
-        loader_kwargs = kwargify(
-            batch_size=None,
-            num_workers=self.test_workers // 2,
-            pin_memory=pin_memory
+
+        real_wrap = functools.partial(RealDataset, **base_kwargs)
+        fake_wrap = functools.partial(FakeDataset, **base_kwargs)
+        start_train_workers &= (image_cache_workers > 0)
+        start_test_workers &= (image_cache_workers > 0)
+
+        train_kwargs = kwargify(
+            file_map=self.train_face_files,
+            num_image_cache_processes=image_cache_workers,
+            start_mp_image_cache=start_train_workers
+        )
+        test_kwargs = kwargify(
+            file_map=self.test_face_files,
+            num_image_cache_processes=image_cache_workers,
+            start_mp_image_cache=start_test_workers
         )
 
-        real_wrap = functools.partial(
-            RealDataset, **base_kwargs,
-            queue=train_queue
-        )
-        fake_wrap = functools.partial(
-            FakeDataset, **base_kwargs
-        )
+        self.train_real_dataset = real_wrap(**train_kwargs)
+        self.train_fake_dataset = fake_wrap(**train_kwargs)
+        self.test_real_dataset = real_wrap(**test_kwargs)
+        self.test_fake_dataset = fake_wrap(**test_kwargs)
 
-        train_real_data = real_wrap(file_map=self.train_face_files)
-        print(f'TRAIN REAL LOAD', train_real_data.num_files)
-        self.train_real_dataset = data_utils.DataLoader(
-            train_real_data, **loader_kwargs
-        )
-        train_fake_data = fake_wrap(file_map=self.train_face_files)
-        print(f'TRAIN FAKE LOAD', train_fake_data.num_files)
-        self.train_fake_dataset = data_utils.DataLoader(
-            train_fake_data, **loader_kwargs
-        )
+        print(f'TRAIN REAL LOAD', self.train_real_dataset.num_files)
+        print(f'TRAIN FAKE LOAD', self.train_fake_dataset.num_files)
+        print(f'TEST REAL LOAD', self.test_real_dataset.num_files)
+        print(f'TEST FAKE LOAD', self.test_fake_dataset.num_files)
 
-        test_real_data = real_wrap(file_map=self.test_face_files)
-        print(f'TEST REAL LOAD', test_real_data.num_files)
-        self.test_real_dataset = data_utils.DataLoader(
-            test_real_data, **loader_kwargs
-        )
-        test_fake_data = fake_wrap(file_map=self.test_face_files)
-        print(f'TEST FAKE LOAD', test_fake_data.num_files)
-        self.test_fake_dataset = data_utils.DataLoader(
-            test_fake_data, **loader_kwargs
-        )
-
-    def load(self):
+    def load(self, *args, **kwargs):
         self.load_datasets()
-        self.start_data_loaders()
+        self.start_data_loaders(*args, **kwargs)
         self.loaded = True
 
     def load_datasets(

@@ -25,7 +25,8 @@ from BaseDataset import MelCache
 # preload_path = 'saves/checkpoints/211120-1303/E2558336_T0.73_V0.65.pt'
 # preload_path = 'saves/checkpoints/211125-0108/E1261472_T0.6_V0.54.pt'
 # preload_path = 'saves/checkpoints/211125-0108/E1178048_T0.6_V0.52.pt'
-preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
+# preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
+preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
 
 class FaceSamplesHolder(object):
     def __init__(self, predictor, batch_size=16):
