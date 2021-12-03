@@ -3,6 +3,7 @@ import random
 import ParentImport
 
 import os
+import sys
 import audio
 import pandas as pd
 import numpy as np
@@ -64,14 +65,29 @@ class FaceSamplesHolder(object):
 
         return False
 
-    def load_from_cache(self, num_samples):
-        assert num_samples <= len(self.face_samples_cache)
-        keys = list(self.face_samples_cache.keys())
-        random.shuffle(keys)
+    @staticmethod
+    def warn(message):
+        print(message, file=sys.stderr)
+
+    def load_from_cache(self, num_samples, check_size=True):
+        assert (
+            num_samples <= len(self.face_samples_cache)
+            or not check_size
+        )
 
         img_batch, mel_batch = [], []
-        
-        for key in keys:
+        init_cache_keys = list(self.face_samples_cache.keys())
+        random.shuffle(init_cache_keys)
+        cache_keys = init_cache_keys[::]
+
+        if len(cache_keys) < num_samples:
+            cache_size = len(cache_keys)
+            self.warn(f'UNDERSIZED CACHE {cache_size}')
+
+        while len(cache_keys) < num_samples:
+            cache_keys += init_cache_keys
+
+        for key in cache_keys[:num_samples]:
             filename, face_no = key
             face_samples = self.face_samples_cache[key]
             face_sample = random.choice(face_samples)
@@ -85,6 +101,7 @@ class FaceSamplesHolder(object):
             img_batch.append(t_img)
             mel_batch.append(t_mel)
 
+        assert len(img_batch) == num_samples
         return img_batch, mel_batch
 
     def resolve_samples(self, check_size=True):
@@ -123,7 +140,10 @@ class FaceSamplesHolder(object):
             mel_batch.append(t_mel)
 
         buffer_needed = self.batch_size - len(img_batch)
-        cache_items = self.load_from_cache(buffer_needed)
+        cache_items = self.load_from_cache(
+            buffer_needed, check_size=check_size
+        )
+
         cache_img_batch, cache_mel_batch = cache_items
         img_batch.extend(cache_img_batch)
         mel_batch.extend(cache_mel_batch)
@@ -139,7 +159,7 @@ class FaceSamplesHolder(object):
             return False
 
         t_img_batch, t_mel_batch, key_batch = torch_batch
-        preds = self.predictor.predict(t_mel_batch, t_img_batch)
+        preds, confs = self.predictor.predict(t_mel_batch, t_img_batch)
         preds = preds.detach().cpu().numpy()
 
         for k, key in enumerate(key_batch):
@@ -158,10 +178,10 @@ class FaceSamplesHolder(object):
 
 
 class VideoSyncPredictor(object):
-    def __init__(self, seed=42):
+    def __init__(self, seed=42, use_cuda=True):
         self.extractor = NeuralFaceExtract()
         self.trainer = SyncnetTrainer(
-            use_cuda=True, load_dataset=False, use_joon=True,
+            use_cuda=use_cuda, load_dataset=False, use_joon=True,
             # preload_path=preload_path, is_checkpoint=False,
             preload_path=preload_path, old_joon=False, pred_ratio=1.0,
             is_checkpoint=False,
@@ -184,6 +204,7 @@ class VideoSyncPredictor(object):
         self.real_files = real_files.to_numpy().tolist()
         self.swap_fakes = swap_fakes.to_numpy().tolist()
         self.all_filenames = all_filenames
+        self.use_cuda = use_cuda
         self.seed = seed
 
         print(f'num files loaded {all_filenames}')
@@ -469,8 +490,8 @@ percent fake: 0.1978021978021978
 """
 
 if __name__ == '__main__':
-    sync_predictor = VideoSyncPredictor()
+    sync_predictor = VideoSyncPredictor(use_cuda=False)
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
-    sync_predictor.profile_infer(batch_size=32)
+    sync_predictor.profile_infer(clip=16, batch_size=32)
     # sync_predictor.profile_start()

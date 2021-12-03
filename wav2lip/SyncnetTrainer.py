@@ -6,6 +6,7 @@ try:
     from models import SyncNet_color as SyncNet
     from models import SyncnetJoonV1
     from models import SyncnetJoon
+    from helpers import WeightedBCE
     from hparams import hparams
 
 except ModuleNotFoundError:
@@ -16,6 +17,7 @@ except ModuleNotFoundError:
     from .models import SyncNet_color as SyncNet
     from .models import SyncnetJoon
     from .models import SyncnetJoonV1
+    from .helpers import WeightedBCE
     from .hparams import hparams
 
 import torch
@@ -41,6 +43,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from datetime import datetime as Datetime
 from torch.multiprocessing import set_start_method
+from typing import Optional
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -58,6 +61,7 @@ try:
 except RuntimeError:
     pass
 
+
 class SyncnetTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
@@ -70,7 +74,8 @@ class SyncnetTrainer(object):
         audio_base_dir='../datasets/extract/audios-flac',
         mel_cache_path='saves/preprocessed/mel_cache.npy',
         old_joon=True, dropout_p=0.0, transform_image=False,
-        fcc_list=None
+        fcc_list=None, predict_confidence=False,
+        binomial_train_sampling=True, binomial_test_sampling=False
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -83,10 +88,14 @@ class SyncnetTrainer(object):
         self.accum_train_score = 0
         self.accum_validate_score = 0
         self.save_threshold = save_threshold
+        self.predict_confidence = predict_confidence
         self.transform_image = transform_image
         self.dropout_p = dropout_p
         self.valid_p = valid_p
         self.test_p = test_p
+
+        self.binomial_train_sampling = binomial_train_sampling
+        self.binomial_test_sampling = binomial_test_sampling
 
         self.save_best_every = 2500
         self.perf_decay = 0.96
@@ -111,8 +120,10 @@ class SyncnetTrainer(object):
                 self.model = SyncnetJoonV1()
             else:
                 print('USING JOON V2')
+                outputs = 2 if predict_confidence else 1
                 self.model = SyncnetJoon(
-                    dropout_p=dropout_p, fcc_list=fcc_list
+                    dropout_p=dropout_p, fcc_list=fcc_list,
+                    num_outputs=outputs
                 )
 
             if mel_step_size is None:
@@ -134,7 +145,8 @@ class SyncnetTrainer(object):
         ]
 
         # self.criterion = nn.CrossEntropyLoss()
-        self.criterion = nn.BCELoss()
+        # self.criterion = nn.BCELoss()
+        self.criterion = WeightedBCE()
         self.params = list(self.model.parameters())
 
         self.optimizer = optim.Adam(
@@ -213,19 +225,25 @@ class SyncnetTrainer(object):
     def predict(self, t_mels, t_images):
         if self.pred_ratio == 0.:
             # assert not self.use_joon
-            predictions = self.model.predict(t_mels, t_images)
+            raw_preds = self.model.predict(t_mels, t_images)
         else:
-            predictions = self.model.pred_fcc(
+            raw_preds = self.model.pred_fcc(
                 t_mels, t_images, fcc_ratio=self.pred_ratio
             )
 
-        non_flat_dims = 0
-        for dim in predictions.shape:
-            non_flat_dims += 1 if dim != 1 else 0
+        if self.predict_confidence:
+            predictions = raw_preds[:, 0]
+            confidences = raw_preds[:, 1]
+        else:
+            non_flat_dims = 0
+            for dim in raw_preds.shape:
+                non_flat_dims += 1 if dim != 1 else 0
 
-        assert non_flat_dims == 1
-        predictions = torch.flatten(predictions)
-        return predictions
+            assert non_flat_dims == 1
+            predictions = torch.flatten(raw_preds)
+            confidences = torch.ones(predictions.shape)
+
+        return predictions, confidences
 
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
@@ -235,28 +253,30 @@ class SyncnetTrainer(object):
             batch_size = self.batch_size
 
         self.model.train()
+        self.optimizer.zero_grad()
 
         torch_batch = self.prepare_torch_batch(
             batch_size=batch_size, fake_p=fake_p,
+            binomial_sampling=self.binomial_train_sampling,
             is_training=True, randomize=True
         )
 
         t_labels, t_images, t_mels = torch_batch
-        preds = self.predict(t_mels, t_images)
-
-        self.optimizer.zero_grad()
-        loss = self.criterion(preds, t_labels)
+        preds, confs = self.predict(t_mels, t_images)
+        loss = self.criterion(preds, t_labels, confs)
         loss_value = loss.item()
+
         loss.backward()
         self.optimizer.step()
 
-        callback = self.record_train_errors if record else None
-
+        np_confs = confs.detach().cpu().numpy().flatten()
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = t_labels.detach().cpu().numpy().flatten()
+
+        callback = self.record_train_errors if record else None
         score = self.record_metrics(
             episode_no, loss_value, np_preds, flat_labels,
-            callback=callback
+            callback=callback, confs=np_confs
         )
 
         return score
@@ -276,23 +296,27 @@ class SyncnetTrainer(object):
 
         torch_batch = self.prepare_torch_batch(
             batch_size=batch_size, fake_p=fake_p,
+            binomial_sampling=self.binomial_test_sampling,
             is_training=use_train_data, randomize=True
         )
 
         with torch.no_grad():
             t_labels, t_images, t_mels = torch_batch
-            preds = self.predict(t_mels, t_images)
-            loss = self.criterion(preds, t_labels)
+            preds, confs = self.predict(t_mels, t_images)
+            loss = self.criterion(preds, t_labels, confs)
             loss_value = loss.item()
 
         self.model.train(True)
         self.optimizer.zero_grad()
 
+        np_confs = confs.detach().cpu().numpy().flatten()
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = t_labels.detach().cpu().numpy().flatten()
+
+        callback = self.record_validate_errors
         score = self.record_metrics(
             episode_no, loss_value, np_preds, flat_labels,
-            callback=self.record_validate_errors
+            callback=callback, confs=np_confs
         )
 
         return score
@@ -419,10 +443,11 @@ class SyncnetTrainer(object):
 
         if no_grad:
             with torch.no_grad():
-                predictions = predict(t_mel_batch, t_img_batch)
+                raw_preds = predict(t_mel_batch, t_img_batch)
         else:
-            predictions = predict(t_mel_batch, t_img_batch)
+            raw_preds = predict(t_mel_batch, t_img_batch)
 
+        predictions, confidences = raw_preds
         predictions = predictions.detach()
 
         if to_numpy:
@@ -606,7 +631,8 @@ class SyncnetTrainer(object):
 
             with torch.no_grad():
                 t_labels, t_images, t_mels = torch_batch
-                preds = self.predict(t_mels, t_images)
+                raw_preds = self.predict(t_mels, t_images)
+                preds, confs = raw_preds
 
             np_preds = preds.detach().cpu().numpy().flatten()
             np_labels = t_labels.detach().cpu().numpy().flatten()
@@ -691,7 +717,7 @@ class SyncnetTrainer(object):
         self.tensorboard_started = True
 
     @staticmethod
-    def get_metrics(np_preds, np_labels):
+    def get_metrics_v1(np_preds, np_labels):
         round_preds = np.round(np_preds)
         matches = np.equal(round_preds, np_labels)
         accuracy = sum(matches) / len(matches)
@@ -702,22 +728,59 @@ class SyncnetTrainer(object):
         mse = (squared_error / errors.size) ** 0.5
         return me, mse, accuracy
 
-    @classmethod
+    @staticmethod
+    def get_metrics(np_preds, np_labels, weights=None):
+        assert np_preds.shape == np_labels.shape
+
+        if weights is None:
+            weights = np.ones_like(np_preds)
+            weights = weights.astype(np.float)
+
+        n_weights = weights * len(weights) / sum(weights)
+
+        round_preds = np.round(np_preds)
+        matches = np.equal(round_preds, np_labels)
+        w_accuracy = np.sum(n_weights * matches) / len(matches)
+
+        errors = abs(np_preds - np_labels)
+        w_errors = n_weights * errors
+        w_me = np.sum(w_errors) / errors.size
+
+        squared_error = np.sum((np_preds - np_labels) ** 2)
+        w_squared_error = np.sum(n_weights * squared_error)
+        w_mse = (w_squared_error / errors.size) ** 0.5
+        return w_me, w_mse, w_accuracy
+
     def record_metrics(
-        cls, episode_no, loss_value, np_preds, flat_labels,
-        callback
+        self, episode_no, loss_value, np_preds, flat_labels,
+        callback, confs=None
     ):
-        me, mse, accuracy = cls.get_metrics(
+        conf_mean, conf_std = None, None
+        w_me, w_mse, w_accuracy = None, None, None
+        me, mse, accuracy = self.get_metrics(
             np_preds, flat_labels
         )
+
+        if self.predict_confidence and (confs is not None):
+            n_confs = confs * len(confs) / np.sum(confs)
+            conf_mean, conf_std = np.mean(n_confs), np.std(n_confs)
+            w_me, w_mse, w_accuracy = self.get_metrics(
+                np_preds, flat_labels, weights=n_confs
+            )
 
         if callback is not None:
             callback(
                 step=episode_no, loss=loss_value,
-                me=me, mse=mse, accuracy=accuracy
+                me=me, mse=mse, accuracy=accuracy,
+                w_me=w_me, w_mse=w_mse, w_accuracy=w_accuracy,
+                conf_mean=conf_mean, conf_std=conf_std
             )
 
-        score = 2 * accuracy - 1
+        if w_accuracy is not None:
+            score = 2 * w_accuracy - 1
+        else:
+            score = 2 * accuracy - 1
+
         return score
 
     def record_validate_errors(self, *args, **kwargs):
@@ -732,17 +795,37 @@ class SyncnetTrainer(object):
 
     def record_errors(
         self, file_writer, step, loss, me=-1, mse=-1,
-        accuracy=-1
+        accuracy=-1, w_loss=None, w_me=None, w_mse=None,
+        w_accuracy=None, conf_mean=None, conf_std=None
     ):
         assert self.tensorboard_started
         score = 2 * accuracy - 1
+        if w_accuracy is not None:
+            w_score = 2 * w_accuracy - 1
+        else:
+            w_score = None
 
-        file_writer.add_scalar('loss', loss, global_step=step)
-        file_writer.add_scalar('mean_error', me, global_step=step)
-        file_writer.add_scalar('accuracy', accuracy, global_step=step)
-        file_writer.add_scalar('score', score, global_step=step)
-        file_writer.add_scalar(
-            'mean_squared_error', mse, global_step=step
-        )
+        def write_scalar(name, value, global_step=step):
+            if value is None:
+                return False
+
+            file_writer.add_scalar(
+                name, value, global_step=global_step
+            )
+
+        write_scalar('loss', loss)
+        write_scalar('mean_error', me)
+        write_scalar('mean_squared_error', mse)
+        write_scalar('accuracy', accuracy)
+        write_scalar('score', score)
+
+        write_scalar('w_loss', w_loss)
+        write_scalar('w_mean_error', w_me)
+        write_scalar('w_mean_squared_error', w_mse)
+        write_scalar('w_accuracy', w_accuracy)
+        write_scalar('w_score', w_score)
+
+        write_scalar('conf_mean', conf_mean)
+        write_scalar('conf_std', conf_std)
 
         file_writer.flush()
