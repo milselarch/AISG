@@ -1,3 +1,5 @@
+import os.path
+
 import torch
 import random
 import numpy as np
@@ -6,6 +8,9 @@ try:
     from BaseDataset import BaseDataset
 except ModuleNotFoundError:
     from .BaseDataset import BaseDataset
+
+from overrides import overrides
+
 
 class FakeDataset(BaseDataset):
     def __init__(self, *args, cache_size=4096, **kwargs):
@@ -113,39 +118,26 @@ class FakeDataset(BaseDataset):
             self.fake_img_cache[k] = img_sample
             self.fake_mel_cache[k] = mel_sample
 
+    def _load_random_sample(self):
+        return self.choose_sample()
+
+    def choose_sample(self, filename=None):
+        return self._choose_sample(filename)
+
     def _choose_sample(self, filename):
+        torch_img_sample = self.load_torch_images(filename)
+        filename, image_path, torch_imgs = torch_img_sample
+
         assert type(filename) is str
         current_fps = self.resolve_fps(filename)
         assert current_fps != 0
 
-        name = filename[:filename.rindex('.')]
-        frame_no, window_fnames = 0, None
-        image_paths = self.load_image_paths(
-            name, randomize_images=True
-        )
-
-        while window_fnames is None:
-            image_path = random.choice(image_paths)
-            frame_no = self.get_frame_no(image_path)
-            window_fnames = self.get_window(image_path)
-
-        torch_imgs = self.batch_image_window(window_fnames)
+        frame_no = self.get_frame_no(image_path)
         torch_mels = self._load_random_audio_sample(
             filename, exclude_frame_no=frame_no
         )
 
         return torch_imgs, torch_mels
-
-    def _load_random_sample(self):
-        return self.choose_sample()
-
-    def choose_sample(self, filename=None):
-        if filename is None:
-            name = self.choose_random_name()
-            filename = f'{name}.mp4'
-
-        # print('FILENAME', filename)
-        return self._choose_sample(filename)
 
     def _load_random_audio_sample(
         self, exclude_filename, exclude_frame_no

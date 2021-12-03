@@ -37,7 +37,14 @@ if __name__ == '__main__':
     )
 
     trainer.load_model(preload_path, eval_mode=True)
-    trainer.start_dataset_workers()
+    is_training = True
+
+    trainer.start_dataset_workers(
+        start_train_workers=is_training,
+        start_test_workers=not is_training,
+        image_cache_workers=1
+    )
     trainer.validate(
-        episodes=1000, fake_p=0, mono_filename=True
+        episodes=1000, fake_p=0.5, mono_filename=False,
+        use_train_data=is_training
     )

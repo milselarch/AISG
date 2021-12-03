@@ -5,6 +5,7 @@ try:
 except ModuleNotFoundError:
     from .BaseDataset import BaseDataset
 
+from overrides import overrides
 from queue import Empty as QueueEmpty
 
 class RealDataset(BaseDataset):
@@ -78,18 +79,17 @@ class RealDataset(BaseDataset):
         self, filename=None, frame_no=None, face_no=None,
         mirror_prob=0.5
     ):
-        if filename is None:
-            filename = self.choose_random_filename()
-
-        current_mel = self.load_audio(filename)
-        current_fps = self.resolve_fps(filename)
-
         while True:
-            image_path, torch_imgs = self.load_torch_window(
+            torch_img_sample = self.load_torch_images(
                 filename, frame_no=frame_no, face_no=face_no,
                 mirror_prob=mirror_prob
             )
-            frame_no = self.get_frame_no(image_path)
+
+            img_filename, img_path, torch_imgs = torch_img_sample
+            current_fps = self.resolve_fps(img_filename)
+            current_mel = self.load_audio(img_filename)
+
+            frame_no = self.get_frame_no(img_path)
             torch_mels = self.load_mel_batch(
                 current_mel, current_fps, frame_no
             )
@@ -118,30 +118,6 @@ class RealDataset(BaseDataset):
         index = random.choice(range(self.num_caches))
         cache = self.rand_cache[index]
         return cache
-
-    def load_torch_window(
-        self, filename, frame_no=None, face_no=None,
-        mirror_prob=0.5
-    ):
-        window_fnames, image_path = None, None
-
-        while window_fnames is None:
-            image_paths = self.load_image_paths(
-                filename, randomize_images=True,
-                num_samples=all
-            )
-            image_path = self.filter_image_paths(
-                image_paths, target_frame_no=frame_no,
-                target_face_no=face_no, ensure_single=False
-            )[0]
-
-            window_fnames = self.get_window(image_path)
-
-        torch_imgs = self.batch_image_window(
-            window_fnames, mirror_prob=mirror_prob
-        )
-
-        return image_path, torch_imgs
 
     def _load_random_sample(self, cache):
         current_mel = cache['mel']
