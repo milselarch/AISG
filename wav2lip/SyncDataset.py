@@ -8,6 +8,7 @@ try:
     from hparams import hparams, get_image_list
     from ManagerCache import Cache, TrainTypes
     from models import SyncNet_color as SyncNet
+    from helpers import Binomial
 
     from FaceAnalysis import FaceCluster
 
@@ -15,6 +16,7 @@ try:
     from BaseDataset import BaseDataset
     from RealDataset import RealDataset
     from FakeDataset import FakeDataset
+
 except ModuleNotFoundError:
     from . import ParentImport
     from . import audio
@@ -22,6 +24,7 @@ except ModuleNotFoundError:
     from .hparams import hparams, get_image_list
     from .ManagerCache import Cache, TrainTypes
     from .models import SyncNet_color as SyncNet
+    from .helpers import Binomial
 
     from ..FaceAnalysis import FaceCluster
 
@@ -277,11 +280,16 @@ class SyncDataset(object):
 
     def prepare_batch(
         self, batch_size, fake_p=0.5, is_training=True,
-        randomize=True, filename=None
+        randomize=True, filename=None, binomial_sampling=False
     ):
-        fake_count = int(batch_size * fake_p)
-        real_count = batch_size - fake_count
+        if binomial_sampling:
+            fake_count = Binomial.random_sample(
+                batch_size, prob=fake_p
+            )
+        else:
+            fake_count = int(batch_size * fake_p)
 
+        real_count = batch_size - fake_count
         real_images, real_mels = self.load_samples(
             0, real_count, is_training=is_training,
             filename=filename
