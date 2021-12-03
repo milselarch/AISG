@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 
     from ..FaceAnalysis import FaceCluster
     from ..FaceImageMap import FaceImageMap
-    from .DeepfakeDetection.FaceExtractor import FaceImage
+    from ..DeepfakeDetection.FaceExtractor import FaceImage
     from .hparams import hparams
 
 import os
