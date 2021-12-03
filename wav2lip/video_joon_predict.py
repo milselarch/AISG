@@ -34,11 +34,12 @@ class FaceSamplesHolder(object):
         self.predictor = predictor
         self.batch_size = batch_size
 
+        self.face_samples_map = {}
+        self.face_samples_cache = {}
+        self.face_preds_map = {}
+        self.face_confs_map = {}
         self.fps_cache = {}
         self.mel_cache = {}
-        self.face_samples_cache = {}
-        self.face_samples_map = {}
-        self.face_preds_map = {}
 
     def add_face_sample(
         self, filename, face_samples, mel, face_no, fps
@@ -161,14 +162,20 @@ class FaceSamplesHolder(object):
         t_img_batch, t_mel_batch, key_batch = torch_batch
         preds, confs = self.predictor.predict(t_mel_batch, t_img_batch)
         preds = preds.detach().cpu().numpy()
+        confs = confs.detach().cpu().numpy()
 
         for k, key in enumerate(key_batch):
             prediction = preds[k]
+            confidence = confs[k]
+
             if key not in self.face_preds_map:
                 self.face_preds_map[key] = []
+                self.face_confs_map[key] = []
 
             face_preds = self.face_preds_map[key]
+            face_confs = self.face_confs_map[key]
             face_preds.append(prediction)
+            face_confs.append(confidence)
 
         return True
 
