@@ -67,6 +67,23 @@ class FaceSamplesHolder(object):
         self.fps_cache = {}
         self.mel_cache = {}
 
+    def make_video_preds(self, check=True):
+        assert not check or (len(self.face_samples_map) == 0)
+        video_preds_map = {}
+
+        for key in self.face_preds_map:
+            video_face_preds = self.face_preds_map[key]
+            filename, face_no = key
+
+            if filename not in video_preds_map:
+                video_preds_map[filename] = {}
+
+            video_preds = video_preds_map[filename]
+            assert face_no not in video_preds
+            video_preds[face_no] = video_face_preds
+
+        return video_preds_map
+
     def add_face_sample(
         self, filename, face_samples, mel, face_no, fps
     ):

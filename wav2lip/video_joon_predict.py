@@ -267,32 +267,42 @@ class VideoSyncPredictor(object):
             gc.collect()
 
         samples_holder.flush()
-        all_preds, all_labels = [], []
+        video_preds_map = samples_holder.make_video_preds()
         video_preds, video_labels = [], []
-        face_preds_map = samples_holder.face_preds_map
+        all_preds, all_labels = [], []
 
-        for key in face_preds_map:
-            filename, face_no = key
-            predictions = face_preds_map[key]
-            np_preds = np.array(predictions)
-            num_faces = num_face_map[filename]
+        for filename in video_preds_map:
+            current_video_preds = video_preds_map[filename]
+            print(f'\n video {filename}')
+            face_preds = []
+
+            for face_no in current_video_preds:
+                predictions = current_video_preds[face_no]
+                np_preds = np.array(predictions)
+                num_faces = num_face_map[filename]
+                tag = self.get_tag(filename)
+
+                print(f'[{face_no}] predictions: {np_preds}')
+
+                self.record_preds(
+                    predictions, face_no, num_faces,
+                    filename=filename, tag=tag
+                )
+
+                label = tag != 'R'
+                labels = [label] * len(predictions)
+                all_preds.extend(predictions)
+                all_labels.extend(labels)
+
+                face_pred = np.median(predictions)
+                print(f'[{face_no}] face pred: {face_pred}')
+                face_preds.append(face_pred)
+
+            video_pred = min(face_preds)
             tag = self.get_tag(filename)
-    
-            print('')
-            print(f'predictions: {np_preds}')
-
-            self.record_preds(
-                predictions, face_no, num_faces,
-                filename=filename, tag=tag
-            )
-
             label = tag != 'R'
-            labels = [label] * len(predictions)
-            all_preds.extend(predictions)
-            all_labels.extend(labels)
 
-            median_pred = np.median(predictions)
-            video_preds.append(median_pred)
+            video_preds.append(video_pred)
             video_labels.append(label)
 
         all_preds = np.array(all_preds)
@@ -403,5 +413,5 @@ if __name__ == '__main__':
 
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
-    sync_predictor.profile_infer(clip=32, batch_size=32)
+    sync_predictor.profile_infer(clip=64, batch_size=32)
     # sync_predictor.profile_start()
