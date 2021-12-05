@@ -9,6 +9,8 @@ try:
     from helpers import WeightedBCE
     from hparams import hparams
 
+    from DeepfakeDetection.FaceExtractor import FaceImage
+
 except ModuleNotFoundError:
     from . import ParentImport
     from . import audio
@@ -19,6 +21,8 @@ except ModuleNotFoundError:
     from .models import SyncnetJoonV1
     from .helpers import WeightedBCE
     from .hparams import hparams
+
+    from ..DeepfakeDetection.FaceExtractor import FaceImage
 
 import torch
 import torch.nn as nn
@@ -43,7 +47,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from datetime import datetime as Datetime
 from torch.multiprocessing import set_start_method
-from typing import Optional
+from typing import Optional, List
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -359,9 +363,10 @@ class SyncnetTrainer(object):
         print(f'Loaded checkpoint from {checkpoint_path}')
 
     def to_torch_batch(
-        self, face_samples, melspectogram, fps,
-        transpose_audio=False, use_joon=None, is_raw_audio=False,
-        to_device=True, auto_double=True
+        self, face_samples: List[List[FaceImage]],
+        melspectogram, fps, transpose_audio=False, use_joon=None,
+        is_raw_audio=False, to_device=True, auto_double=True,
+        use_mouth_image=False
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -379,7 +384,16 @@ class SyncnetTrainer(object):
         for sample_batch in face_samples:
             first_face_image = sample_batch[0]
             frame_no = first_face_image.frame_no
-            raw_images = [f.image for f in sample_batch]
+            raw_images = []
+
+            for face_image in sample_batch:
+                if use_mouth_image:
+                    raw_image = face_image.mouth_image
+                else:
+                    raw_image = face_image.image
+
+                assert raw_image is not None
+                raw_images.append(raw_image)
 
             if use_joon:
                 torch_img_sample = self.dataset.batch_images_joon(

@@ -28,23 +28,28 @@ from BaseDataset import MelCache
 # preload_path = 'saves/checkpoints/211125-0108/E1261472_T0.6_V0.54.pt'
 # preload_path = 'saves/checkpoints/211125-0108/E1178048_T0.6_V0.52.pt'
 # preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
-preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
-
+# preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
+preload_path = 'saves/checkpoints/211202-0328/E8554752_T0.78_V0.68.pt'
 
 class VideoSyncPredictor(object):
-    def __init__(self, seed=42, use_cuda=True):
+    def __init__(
+        self, seed=42, use_cuda=True,
+        face_base_dir='../datasets/extract/mtcnn-sync'
+    ):
         self.extractor = NeuralFaceExtract()
         self.trainer = SyncnetTrainer(
+            face_base_dir=face_base_dir,
             use_cuda=use_cuda, load_dataset=False, use_joon=True,
             # preload_path=preload_path, is_checkpoint=False,
             preload_path=preload_path, old_joon=False, pred_ratio=1.0,
-            is_checkpoint=False,
+            is_checkpoint=False, predict_confidence=True,
 
             fcc_list=(512, 128, 32), dropout_p=0.5,
             transform_image=True
         )
 
         # self.trainer.model.disable_norm_toggle()
+        self.face_base_dir = face_base_dir
         self.audio_base_dir = '../datasets/extract/audios-flac'
         self.video_base_dir = '../datasets/train/videos'
 
@@ -263,6 +268,7 @@ class VideoSyncPredictor(object):
 
         samples_holder.flush()
         all_preds, all_labels = [], []
+        video_preds, video_labels = [], []
         face_preds_map = samples_holder.face_preds_map
 
         for key in face_preds_map:
@@ -280,13 +286,18 @@ class VideoSyncPredictor(object):
                 filename=filename, tag=tag
             )
 
-            labels = [tag != 'R'] * len(predictions)
+            label = tag != 'R'
+            labels = [label] * len(predictions)
             all_preds.extend(predictions)
             all_labels.extend(labels)
 
+            median_pred = np.median(predictions)
+            video_preds.append(median_pred)
+            video_labels.append(label)
+
         all_preds = np.array(all_preds)
         all_labels = np.array(all_labels)
-        me, mse, accuracy = self.trainer.get_metrics(
+        me, mse, acc = self.trainer.get_metrics(
             all_preds, all_labels
         )
         mean_pred = np.mean(all_preds)
@@ -297,9 +308,29 @@ class VideoSyncPredictor(object):
         print(f'mean error: {me}')
         print(f'mean squared error: {mse}')
         print(f'mean pred: {mean_pred}')
-        print(f'accuracy: {accuracy}')
+        print(f'accuracy: {acc}')
         print(f'percent fake: {p_fake}')
+
+        video_preds = np.array(video_preds)
+        video_labels = np.array(video_labels)
+        p_vid_fake = sum(video_labels) / len(video_labels)
+        vid_me, vid_mse, vid_acc = self.trainer.get_metrics(
+            video_preds, video_labels
+        )
+
+        print('')
+        print(f'video mean error: {vid_me}')
+        print(f'video mean squared error: {vid_mse}')
+        print(f'video mean pred: {mean_pred}')
+        print(f'video accuracy: {vid_acc}')
+        print(f'percent vid fake: {p_vid_fake}')
+
         self.store_preds(date_stamp)
+
+        predict_time_taken = samples_holder.timer.total
+        predict_per_video = predict_time_taken / len(filenames)
+        print(f'predict time taken: {predict_time_taken}')
+        print(f'predict time per video: {predict_per_video}')
 
     def store_preds(self, date_stamp=None):
         if date_stamp is None:
@@ -336,16 +367,41 @@ class VideoSyncPredictor(object):
 
 
 """
+[pre-scrambling]
+211125-1900/E2674624_T0.68_V0.56.pt
+---------------------------------
 mean error: 0.6693221431075435
 mean squared error: 0.7528739890437786
 mean pred: 0.7487096786499023
 accuracy: 0.31868131868131866
 percent fake: 0.1978021978021978
+
+211125-1900/E2674624_T0.68_V0.56.pt
+---------------------------------
+mean error: 0.18534135606346858
+mean squared error: 5.503507536070516
+mean pred: 0.3159324526786804
+accuracy: 0.9282407407407407
+percent fake: 0.24074074074074073
+
+[mtcnn-sync on mtcnn-lip]
+211125-1900/E2674624_T0.68_V0.56.pt
+---------------------------------
+mean error: 0.6087206145532912
+mean squared error: 14.451363912977643
+mean pred: 0.6550164818763733
+accuracy: 0.375
+percent fake: 0.24074074074074073
+
 """
 
 if __name__ == '__main__':
-    sync_predictor = VideoSyncPredictor(use_cuda=False)
+    sync_predictor = VideoSyncPredictor(
+        face_base_dir='../datasets/extract/mtcnn-lip',
+        use_cuda=False
+    )
+
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
-    sync_predictor.profile_infer(clip=16, batch_size=32)
+    sync_predictor.profile_infer(clip=32, batch_size=32)
     # sync_predictor.profile_start()

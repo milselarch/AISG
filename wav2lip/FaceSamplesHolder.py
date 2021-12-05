@@ -9,15 +9,56 @@ import pandas as pd
 import numpy as np
 import cProfile
 import torch
+import time
 import gc
 
 from tqdm.auto import tqdm
 
 
+class Timer(object):
+    def __init__(self, total_time=0):
+        self.total_time = total_time
+        self.start_time = None
+
+    @property
+    def total(self):
+        return self.total_time
+
+    def __repr__(self):
+        name = self.__class__.__name__
+        return f'{name}({self.total_time})'
+
+    def __enter__(self):
+        self.start()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # warning: returning True in __exit__
+        # WILL SUPPRESS ALL ERRORS
+        self.pause()
+
+    def start(self):
+        self.start_time = time.perf_counter()
+
+    def pause(self):
+        assert self.start_time is not None
+        end_time = time.perf_counter()
+        duration = end_time - self.start_time
+        self.total_time += duration
+        self.start_time = None
+
+
 class FaceSamplesHolder(object):
-    def __init__(self, predictor, batch_size=16):
+    def __init__(
+        self, predictor, batch_size=16, use_mouth_image=False,
+        timer=None
+    ):
+        if timer is None:
+            timer = Timer()
+
         self.predictor = predictor
         self.batch_size = batch_size
+        self.use_mouth_image = use_mouth_image
+        self.timer = timer
 
         self.face_samples_map = {}
         self.face_samples_cache = {}
@@ -90,7 +131,9 @@ class FaceSamplesHolder(object):
         assert len(img_batch) == num_samples
         return img_batch, mel_batch
 
-    def resolve_samples(self, check_size=True):
+    def resolve_samples(
+        self, check_size=True, use_mouth_image=False
+    ):
         length = len(self.face_samples_map)
         if check_size and (length < self.batch_size):
             return False
@@ -106,7 +149,8 @@ class FaceSamplesHolder(object):
             cct = self.mel_cache[filename]
             fps = self.fps_cache[filename]
             torch_data = self.predictor.to_torch_batch(
-                [face_sample], cct, fps=fps, auto_double=False
+                [face_sample], cct, fps=fps, auto_double=False,
+                use_mouth_image=use_mouth_image
             )
 
             if len(self.face_samples_map[key]) == 0:
@@ -140,12 +184,18 @@ class FaceSamplesHolder(object):
 
     def auto_predict_samples(self, flush=False):
         check_size = not flush
-        torch_batch = self.resolve_samples(check_size)
+        torch_batch = self.resolve_samples(
+            check_size, use_mouth_image=self.use_mouth_image
+        )
+
         if torch_batch is False:
             return False
 
+        self.timer.start()
         t_img_batch, t_mel_batch, key_batch = torch_batch
         preds, confs = self.predictor.predict(t_mel_batch, t_img_batch)
+        self.timer.pause()
+
         preds = preds.detach().cpu().numpy()
         confs = confs.detach().cpu().numpy()
 
