@@ -73,13 +73,16 @@ class SyncnetTrainer(object):
         preload_path=None, is_checkpoint=True, syncnet_T=5,
         strict=True, train_workers=0, test_workers=0,
         pred_ratio=0., use_joon=False, mel_step_size=None,
+
         face_base_dir='../datasets/extract/mtcnn-sync',
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
         mel_cache_path='saves/preprocessed/mel_cache.npy',
+
         old_joon=True, dropout_p=0.0, transform_image=False,
         fcc_list=None, predict_confidence=False,
-        binomial_train_sampling=True, binomial_test_sampling=False
+        binomial_train_sampling=True, binomial_test_sampling=False,
+        eval_mode=False
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -180,6 +183,9 @@ class SyncnetTrainer(object):
             else:
                 self.load_model(preload_path)
 
+        if eval_mode:
+            self.enter_val_model()
+
     def make_data_loader(self, *args, **kwargs):
         return self.dataset.make_data_loader(*args, **kwargs)
 
@@ -193,9 +199,12 @@ class SyncnetTrainer(object):
     def load_model(self, model_path, eval_mode=False):
         self.model.load_state_dict(torch.load(model_path))
         if eval_mode:
-            self.model.eval()
+            self.enter_val_model()
 
         print(f'PRELOADED SYNCNET FROM {model_path}')
+
+    def enter_val_model(self):
+        self.model.eval()
 
     def load_parameters(self, model_path):
         state = self.model.state_dict()
