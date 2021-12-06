@@ -11,30 +11,69 @@ from typing import Optional
 
 bce = torch.nn.BCELoss
 
-class WeightedBCE(Module):
-    def __init__(self, var_scale=0.05) -> None:
-        super(WeightedBCE, self).__init__()
+class WeightedLogitsBCE(Module):
+    def __init__(
+        self, var_scale=0.05, min_weight=0.001
+    ) -> None:
+        super(WeightedLogitsBCE, self).__init__()
         self.var_scale = var_scale
+        self.min_weight = min_weight
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+    @staticmethod
+    def log_sigmoid(x):
+        # gives stable log(sigmoid(x))
+        return x - torch.log(1. + torch.exp(x))
+
+    @classmethod
+    def ilog_sigmoid(cls, x):
+        # gives stable log(1 - sigmoid(x))
+        # log(1 - sigmoid(x))  = log(sigmoid(-x))
+        return cls.log_sigmoid(-x)
+
+    @classmethod
+    def calculate_loss(
+        cls, preds: Tensor, target: Tensor, scaled_weight: Tensor
+    ):
+        """
+        bce_loss = F.binary_cross_entropy(
+            input, target, scaled_weight.detach(),
+            reduction='sum'
+        )
+        bce_loss = torch.dot(-scaled_weight, (
+            target * torch.log(input) +
+            (1. - target) * torch.log(1. - input)
+        ))
+        """
+        bce_loss = torch.dot(-scaled_weight, (
+            target * cls.log_sigmoid(preds) +
+            (1. - target) * cls.ilog_sigmoid(preds)
+        ))
+
+        return bce_loss
+
     def forward(
-        self, input: Tensor, target: Tensor,
+        self, preds: Tensor, target: Tensor,
         weight: Optional[Tensor] = None
     ) -> Tensor:
         if weight is None:
-            weight = torch.ones(input.shape)
+            weight = torch.ones(preds.shape)
 
         assert len(weight.shape) == 1
-        norm_weight = weight * len(weight) / sum(weight)
-        variance = torch.var(norm_weight, unbiased=True)
-        bce_loss = F.binary_cross_entropy(
-            input, target, weight=weight.detach(),
-            reduction='mean'
-        )
+        assert (weight >= 0).all()
 
+        safe_weight = weight + self.min_weight
+        # scale weights such that sum of weights is 1
+        scaled_weight = safe_weight / sum(safe_weight)
+        # normalise weights such that mean weight is 1
+        norm_weight = scaled_weight * len(safe_weight)
+        bce_loss = self.calculate_loss(preds, target, scaled_weight)
+
+        variance = torch.var(norm_weight, unbiased=True)
         loss = bce_loss + variance * self.var_scale
+        assert not torch.isnan(loss).any()
         return loss
 
 

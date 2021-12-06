@@ -6,7 +6,7 @@ try:
     from models import SyncNet_color as SyncNet
     from models import SyncnetJoonV1
     from models import SyncnetJoon
-    from helpers import WeightedBCE
+    from helpers import WeightedLogitsBCE
     from hparams import hparams
 
     from DeepfakeDetection.FaceExtractor import FaceImage
@@ -150,7 +150,7 @@ class SyncnetTrainer(object):
 
         # self.criterion = nn.CrossEntropyLoss()
         # self.criterion = nn.BCELoss()
-        self.criterion = WeightedBCE()
+        self.criterion = WeightedLogitsBCE()
         self.params = list(self.model.parameters())
 
         self.optimizer = optim.Adam(
@@ -226,13 +226,14 @@ class SyncnetTrainer(object):
         loss = self.criterion(d.unsqueeze(1), labels)
         return loss
 
-    def predict(self, t_mels, t_images):
+    def predict(self, t_mels, t_images, sigmoid=True):
         if self.pred_ratio == 0.:
             # assert not self.use_joon
             raw_preds = self.model.predict(t_mels, t_images)
         else:
             raw_preds = self.model.pred_fcc(
-                t_mels, t_images, fcc_ratio=self.pred_ratio
+                t_mels, t_images, fcc_ratio=self.pred_ratio,
+                sigmoid=sigmoid
             )
 
         if self.predict_confidence:
@@ -266,8 +267,12 @@ class SyncnetTrainer(object):
         )
 
         t_labels, t_images, t_mels = torch_batch
-        preds, confs = self.predict(t_mels, t_images)
-        loss = self.criterion(preds, t_labels, confs)
+        raw_output = self.predict(t_mels, t_images, sigmoid=False)
+        sigmoid_preds = [torch.sigmoid(x) for x in raw_output]
+        preds, confs = sigmoid_preds
+
+        raw_preds, raw_confs = raw_output
+        loss = self.criterion(raw_preds, t_labels, confs)
         loss_value = loss.item()
 
         loss.backward()
@@ -306,8 +311,12 @@ class SyncnetTrainer(object):
 
         with torch.no_grad():
             t_labels, t_images, t_mels = torch_batch
-            preds, confs = self.predict(t_mels, t_images)
-            loss = self.criterion(preds, t_labels, confs)
+            raw_output = self.predict(t_mels, t_images, sigmoid=False)
+            sigmoid_preds = [torch.sigmoid(x) for x in raw_output]
+            preds, confs = sigmoid_preds
+
+            raw_preds, raw_confs = raw_output
+            loss = self.criterion(raw_preds, t_labels, confs)
             loss_value = loss.item()
 
         self.model.train(True)
@@ -777,7 +786,7 @@ class SyncnetTrainer(object):
 
         if self.predict_confidence and (confs is not None):
             n_confs = confs * len(confs) / np.sum(confs)
-            conf_mean, conf_std = np.mean(n_confs), np.std(n_confs)
+            conf_mean, conf_std = np.mean(confs), np.std(n_confs)
             w_me, w_mse, w_accuracy = self.get_metrics(
                 np_preds, flat_labels, weights=n_confs
             )
