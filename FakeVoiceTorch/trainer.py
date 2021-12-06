@@ -482,9 +482,10 @@ class Trainer(BaseTrainer):
     def predict_raw_audio(
         self, audio_arr, to_numpy=True, max_length=512,
         max_samples=None, min_samples=0, clip_p=0,
-        max_batch_size=None, no_grad=False
+        max_batch_size=None, no_grad=False, min_length=32
     ):
         assert clip_p < 0.5
+        assert min_length < max_length
 
         mel_spec_array = self.load_melspectrogram(audio_arr)
         clip = int(len(mel_spec_array) * clip_p)
@@ -522,6 +523,13 @@ class Trainer(BaseTrainer):
 
         while index < mel_length:
             sub_mel = torch_batch_x[:, index: index+max_length]
+            sub_mel_length = sub_mel.shape[1]
+
+            has_preds = len(total_preds) > 0
+            is_mel_short = sub_mel_length < min_length
+            if is_mel_short and has_preds:
+                break
+
             preds = self.predict(sub_mel, no_grad=no_grad)
             preds = torch.flatten(preds)
             # print('PREDS', preds.shape)

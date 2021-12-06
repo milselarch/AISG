@@ -1,10 +1,15 @@
 import random
 
-import ParentImport
+try:
+    import ParentImport
+    import audio
+
+except ModuleNotFoundError:
+    from . import ParentImport
+    from . import audio
 
 import os
 import sys
-import audio
 import pandas as pd
 import numpy as np
 import cProfile
@@ -113,6 +118,16 @@ class FaceSamplesHolder(object):
     def warn(message):
         print(message, file=sys.stderr)
 
+    @property
+    def samples_left(self):
+        samples_left = 0
+
+        for key in self.face_samples_map:
+            samples = self.face_samples_map[key]
+            samples_left += len(samples)
+
+        return samples_left
+
     def load_from_cache(self, num_samples, check_size=True):
         assert (
             num_samples <= len(self.face_samples_cache)
@@ -126,7 +141,9 @@ class FaceSamplesHolder(object):
 
         if len(cache_keys) < num_samples:
             cache_size = len(cache_keys)
-            self.warn(f'UNDERSIZED CACHE {cache_size}')
+            samples_left = self.samples_left
+            msg = f'UNDERSIZED CACHE {cache_size} - {samples_left}'
+            self.warn(msg)
 
         while len(cache_keys) < num_samples:
             cache_keys += init_cache_keys
