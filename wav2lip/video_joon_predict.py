@@ -258,7 +258,7 @@ class VideoSyncPredictor(object):
                 face_samples = face_image_map.sample_face_frames(
                     face_no, consecutive_frames=5, extract=False
                 )
-                samples_holder.add_face_sample(
+                samples_holder.add_face_samples(
                     filename, face_samples=face_samples, mel=cct,
                     face_no=face_no, fps=face_image_map.fps
                 )

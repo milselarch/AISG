@@ -19,7 +19,7 @@ except ModuleNotFoundError:
     from .models import SyncNet_color as SyncNet
     from .models import SyncnetJoon
     from .models import SyncnetJoonV1
-    from .helpers import WeightedBCE
+    from .helpers import WeightedLogitsBCE
     from .hparams import hparams
 
     from ..DeepfakeDetection.FaceExtractor import FaceImage
