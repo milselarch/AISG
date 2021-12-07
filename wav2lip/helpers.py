@@ -13,11 +13,14 @@ bce = torch.nn.BCELoss
 
 class WeightedLogitsBCE(Module):
     def __init__(
-        self, var_scale=0.05, min_weight=0.001
+        self, var_scale=0.05, min_weight=1e-4,
+        base_loss_ratio=0.5
     ) -> None:
         super(WeightedLogitsBCE, self).__init__()
-        self.var_scale = var_scale
+
         self.min_weight = min_weight
+        self.var_scale = var_scale
+        self.base_loss_ratio = base_loss_ratio
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -35,7 +38,8 @@ class WeightedLogitsBCE(Module):
 
     @classmethod
     def calculate_loss(
-        cls, preds: Tensor, target: Tensor, scaled_weight: Tensor
+        cls, preds: Tensor, target: Tensor, scaled_weight: Tensor,
+        base_loss_ratio: float
     ):
         """
         bce_loss = F.binary_cross_entropy(
@@ -47,12 +51,19 @@ class WeightedLogitsBCE(Module):
             (1. - target) * torch.log(1. - input)
         ))
         """
-        bce_loss = torch.dot(-scaled_weight, (
+        bce_losses = -1.0 * (
             target * cls.log_sigmoid(preds) +
             (1. - target) * cls.ilog_sigmoid(preds)
-        ))
+        )
 
-        return bce_loss
+        base_bce_loss = torch.sum(bce_losses)
+        scaled_bce_loss = torch.dot(scaled_weight, bce_losses)
+        total_loss = (
+            base_bce_loss * base_loss_ratio +
+            scaled_bce_loss * (1. - base_loss_ratio)
+        )
+
+        return total_loss
 
     def forward(
         self, preds: Tensor, target: Tensor,
@@ -69,7 +80,11 @@ class WeightedLogitsBCE(Module):
         scaled_weight = safe_weight / sum(safe_weight)
         # normalise weights such that mean weight is 1
         norm_weight = scaled_weight * len(safe_weight)
-        bce_loss = self.calculate_loss(preds, target, scaled_weight)
+
+        bce_loss = self.calculate_loss(
+            preds, target, scaled_weight,
+            base_loss_ratio=self.base_loss_ratio
+        )
 
         variance = torch.var(norm_weight, unbiased=True)
         loss = bce_loss + variance * self.var_scale
