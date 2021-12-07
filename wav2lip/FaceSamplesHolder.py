@@ -55,15 +55,19 @@ class Timer(object):
 class FaceSamplesHolder(object):
     def __init__(
         self, predictor, batch_size=16, use_mouth_image=False,
-        timer=None
+        timer=None, garbage_collect_cct=True
     ):
         if timer is None:
             timer = Timer()
 
         self.predictor = predictor
         self.batch_size = batch_size
+        self.garbage_collect_cct = garbage_collect_cct
         self.use_mouth_image = use_mouth_image
         self.timer = timer
+
+        self.ref_counter = {}
+        self.cached_filenames = []
 
         self.face_samples_map = {}
         self.face_samples_cache = {}
@@ -89,27 +93,48 @@ class FaceSamplesHolder(object):
 
         return video_preds_map
 
-    def add_face_sample(
+    def increment_ref_counter(self, filename):
+        if filename not in self.ref_counter:
+            self.ref_counter[filename] = 0
+
+        self.ref_counter[filename] += 1
+
+    def decrement_ref_counter(self, filename):
+        self.ref_counter[filename] -= 1
+        assert self.ref_counter[filename] >= 0
+
+    def add_face_samples(
         self, filename, face_samples, mel, face_no, fps
     ):
         key = (filename, face_no)
+
         self.mel_cache[filename] = mel
+        self.increment_ref_counter(filename)
         self.face_samples_map[key] = face_samples
         self.fps_cache[filename] = fps
-        has_predictions = True
 
+        has_predictions = True
         while has_predictions:
             has_predictions = self.auto_predict_samples(
                 flush=False
             )
 
     def add_to_cache(self, key, face_sample):
+        filename, face_no = key
+        assert type(face_no) is int
+        assert type(filename) is str
+
         if len(self.face_samples_cache) < self.batch_size:
             if key not in self.face_samples_cache:
+                self.increment_ref_counter(filename)
                 self.face_samples_cache[key] = []
 
             cache_face_samples = self.face_samples_cache[key]
             cache_face_samples.append(face_sample)
+
+            if filename not in self.cached_filenames:
+                self.cached_filenames.append(filename)
+
             return True
 
         return False
@@ -188,6 +213,7 @@ class FaceSamplesHolder(object):
             )
 
             if len(self.face_samples_map[key]) == 0:
+                self.decrement_ref_counter(filename)
                 del self.face_samples_map[key]
 
             if torch_data is None:
@@ -195,9 +221,9 @@ class FaceSamplesHolder(object):
 
             t_img, t_mel = torch_data
             self.add_to_cache(key, face_sample)
-            if key not in self.face_samples_map:
-                if key not in self.face_samples_cache:
-                    del self.mel_cache[filename]
+            refs = self.ref_counter.get(filename, 0)
+            if self.garbage_collect_cct and (refs == 0):
+                del self.mel_cache[filename]
 
             key_batch.append(key)
             img_batch.append(t_img)
