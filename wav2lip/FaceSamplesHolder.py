@@ -78,20 +78,25 @@ class FaceSamplesHolder(object):
 
     def make_video_preds(self, check=True):
         assert not check or (len(self.face_samples_map) == 0)
-        video_preds_map = {}
+        video_preds_map, video_confs_map = {}, {}
 
         for key in self.face_preds_map:
-            video_face_preds = self.face_preds_map[key]
             filename, face_no = key
+            video_face_preds = self.face_preds_map[key]
+            video_conf_preds = self.face_confs_map[key]
 
             if filename not in video_preds_map:
                 video_preds_map[filename] = {}
+                video_confs_map[filename] = {}
 
             video_preds = video_preds_map[filename]
+            video_confs = video_confs_map[filename]
+
             assert face_no not in video_preds
             video_preds[face_no] = video_face_preds
+            video_confs[face_no] = video_conf_preds
 
-        return video_preds_map
+        return video_preds_map, video_confs_map
 
     def increment_ref_counter(self, filename):
         if filename not in self.ref_counter:

@@ -96,7 +96,7 @@ class BaseDataset(object):
         log_on_load=False, length=sys.maxsize, face_map=None,
         mel_cache=None, use_joon=False, transform_image=False,
         mp_image_cache_size=32, start_mp_image_cache=False,
-        num_image_cache_processes=1
+        num_image_cache_processes=1, filter_talker=True
     ):
         super(BaseDataset).__init__()
         print('NEW DATASET')
@@ -115,6 +115,7 @@ class BaseDataset(object):
         self.syncnet_T = syncnet_T
         self.syncnet_mel_step_size = syncnet_mel_step_size
         self.torch_img_cache = None
+        self.filter_talker = filter_talker
         self.mel_cache = mel_cache
         self.fps_cache = {}
 
@@ -233,6 +234,8 @@ class BaseDataset(object):
 
                 if talker_face_no == -1:
                     assert face_no == 0
+                elif not self.filter_talker:
+                    pass
                 elif talker_face_no != face_no:
                     continue
 
@@ -597,7 +600,8 @@ class BaseDataset(object):
     @classmethod
     def _cv_loader(
         cls, img, mirror_prob=0.5, size=True,
-        verbose=False, bottom_half=True, assert_square=True
+        verbose=False, bottom_half=True, assert_square=True,
+        bgr_to_rgb=False
     ):
         if size is True:
             size = hparams.img_size
@@ -605,17 +609,20 @@ class BaseDataset(object):
         return cls.load_image(
             img, mirror_prob=mirror_prob, size=size,
             verbose=verbose, bottom_half=bottom_half,
-            assert_square=assert_square
+            assert_square=assert_square, bgr_to_rgb=bgr_to_rgb
         )
 
     @classmethod
     def load_image(
         cls, img, size, mirror_prob=0,
-        verbose=False, bottom_half=False, assert_square=True
+        verbose=False, bottom_half=False, assert_square=True,
+        bgr_to_rgb=True
     ):
         if type(img) is str:
             img = cv2.imread(img)
-            # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        if bgr_to_rgb:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         height, width = img.shape[0], img.shape[1]
         resize_width, resize_height = size, size
@@ -792,10 +799,12 @@ class BaseDataset(object):
         filename = os.path.basename(filename)
         fps = self.resolve_fps(filename)
         folder = filename[:filename.rindex('.')]
-        face_image_map = {}
 
-        face_nos = []
+        face_image_map, face_nos = {}, []
         image_paths = self.file_map[folder]
+        image_paths = sorted(
+            image_paths, key=self.extract_frame
+        )
 
         for image_path in image_paths:
             face_no, frame_no = self.extract_frame(image_path)

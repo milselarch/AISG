@@ -148,7 +148,9 @@ class SyncDataset(object):
 
         return dataset, dataloader
 
-    def make_dataset(self, file_map=None, mel_cache=True):
+    def make_dataset(
+        self, file_map=None, mel_cache=True, **kwargs
+    ):
         if file_map is None:
             file_map = self.train_face_files
 
@@ -159,8 +161,9 @@ class SyncDataset(object):
             self.mel_cache = mel_cache
 
         base_kwargs = self._make_base_kwargs()
-        dataset = RealDataset(file_map, **base_kwargs)
-        return dataset
+        return RealDataset(
+            file_map, **base_kwargs, **kwargs
+        )
 
     def start_data_loaders(
         self, log_on_load=True, image_cache_workers=0,

@@ -29,7 +29,8 @@ from BaseDataset import MelCache
 # preload_path = 'saves/checkpoints/211125-0108/E1178048_T0.6_V0.52.pt'
 # preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
 # preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
-preload_path = 'saves/checkpoints/211202-0328/E8554752_T0.78_V0.68.pt'
+# preload_path = 'saves/checkpoints/211202-0328/E8554752_T0.78_V0.68.pt'
+preload_path = 'saves/checkpoints/211207-0123/E6668864_T0.9_V0.83.pt'
 
 class VideoSyncPredictor(object):
     def __init__(
@@ -39,13 +40,15 @@ class VideoSyncPredictor(object):
         self.extractor = NeuralFaceExtract()
         self.trainer = SyncnetTrainer(
             face_base_dir=face_base_dir,
-            use_cuda=use_cuda, load_dataset=False, use_joon=True,
+            use_cuda=use_cuda, load_dataset=False,
+            use_joon=True, old_joon=False,
             # preload_path=preload_path, is_checkpoint=False,
-            preload_path=preload_path, old_joon=False, pred_ratio=1.0,
-            is_checkpoint=False, predict_confidence=True,
+            preload_path=preload_path,
 
-            fcc_list=(512, 128, 32), dropout_p=0.5,
-            transform_image=True
+            fcc_list=(512, 128, 32),
+            pred_ratio=1.0, dropout_p=0.5,
+            is_checkpoint=False, predict_confidence=True,
+            transform_image=True, eval_mode=False
         )
 
         # self.trainer.model.disable_norm_toggle()
@@ -71,8 +74,8 @@ class VideoSyncPredictor(object):
         print('REALS', self.real_files[:5], len(self.real_files))
 
         # self.filenames = self.swap_fakes
-        self.train_files = open('train.txt').read().split('\n')
-        self.test_files = open('test.txt').read().split('\n')
+        self.train_files = open('stats/train.txt').read().split('\n')
+        self.test_files = open('stats/test.txt').read().split('\n')
 
         self.filenames = self.real_files + self.swap_fakes
         # self.filenames = all_filenames
@@ -171,7 +174,9 @@ class VideoSyncPredictor(object):
         print(f'min pred: {min_pred}')
         print(f'max pred: {max_pred}')
 
-    def profile_start(self, profile_dir='saves/profiles'):
+    def profile_infer_videos(
+        self, *args, profile_dir='saves/profiles', **kwargs
+    ):
         stamp = self.make_date_stamp()
         assert os.path.isdir(profile_dir)
         profile_path = f'{profile_dir}/joon-pred-{stamp}.profile'
@@ -179,7 +184,7 @@ class VideoSyncPredictor(object):
         profile.enable()
 
         try:
-            self.start()
+            self.infer_videos(*args, **kwargs)
         except Exception as e:
             print('TRAINING FAILED')
             raise e
@@ -218,7 +223,8 @@ class VideoSyncPredictor(object):
         return tag
 
     def quick_infer(
-        self, filenames=None, clip=None, batch_size=16
+        self, filenames=None, clip=None, batch_size=16,
+        max_samples=32
     ):
         if filenames is None:
             filenames = self.filenames
@@ -256,7 +262,8 @@ class VideoSyncPredictor(object):
 
             for face_no in face_image_map:
                 face_samples = face_image_map.sample_face_frames(
-                    face_no, consecutive_frames=5, extract=False
+                    face_no, consecutive_frames=5, extract=False,
+                    max_samples=max_samples
                 )
                 samples_holder.add_face_samples(
                     filename, face_samples=face_samples, mel=cct,
@@ -267,19 +274,36 @@ class VideoSyncPredictor(object):
             gc.collect()
 
         samples_holder.flush()
-        video_preds_map = samples_holder.make_video_preds()
+        return self._collate_samples(
+            samples_holder, date_stamp=date_stamp,
+            csv_tag='dataset'
+        )
+
+    def _collate_samples(
+        self, samples_holder, date_stamp=None, csv_tag='vid-preds'
+    ):
+        if date_stamp is None:
+            date_stamp = self.make_date_stamp()
+
+        samples_holder.flush()
+        preds_map = samples_holder.make_video_preds()
+        video_preds_map, video_confs_map = preds_map
+        all_preds, all_labels, all_confs = [], [], []
         video_preds, video_labels = [], []
-        all_preds, all_labels = [], []
+        face_log, filename_log = [], []
 
         for filename in video_preds_map:
             current_video_preds = video_preds_map[filename]
+            current_video_confs = video_confs_map[filename]
             print(f'\n video {filename}')
             face_preds = []
 
             for face_no in current_video_preds:
                 predictions = current_video_preds[face_no]
+                confidences = current_video_confs[face_no]
+                num_faces = len(current_video_preds)
+
                 np_preds = np.array(predictions)
-                num_faces = num_face_map[filename]
                 tag = self.get_tag(filename)
 
                 print(f'[{face_no}] predictions: {np_preds}')
@@ -291,8 +315,12 @@ class VideoSyncPredictor(object):
 
                 label = tag != 'R'
                 labels = [label] * len(predictions)
-                all_preds.extend(predictions)
+
                 all_labels.extend(labels)
+                face_log.extend([face_no] * len(predictions))
+                filename_log.extend([filename] * len(predictions))
+                all_preds.extend(predictions)
+                all_confs.extend(confidences)
 
                 face_pred = np.median(predictions)
                 print(f'[{face_no}] face pred: {face_pred}')
@@ -335,14 +363,36 @@ class VideoSyncPredictor(object):
         print(f'video accuracy: {vid_acc}')
         print(f'percent vid fake: {p_vid_fake}')
 
-        self.store_preds(date_stamp)
+        self.export_video_preds(date_stamp, tag=csv_tag)
+        self.export_all_preds(
+            all_preds, all_confs, face_log, filename_log,
+            all_labels, date_stamp=date_stamp, tag=csv_tag
+        )
 
+        num_filenames = len(video_preds_map)
         predict_time_taken = samples_holder.timer.total
-        predict_per_video = predict_time_taken / len(filenames)
+        predict_per_video = predict_time_taken / num_filenames
         print(f'predict time taken: {predict_time_taken}')
         print(f'predict time per video: {predict_per_video}')
 
-    def store_preds(self, date_stamp=None):
+    def export_all_preds(
+        self, pred_log, conf_log, face_log, filename_log,
+        label_log, date_stamp=None, tag='test'
+    ):
+        if date_stamp is None:
+            date_stamp = self.make_date_stamp()
+
+        df = pd.DataFrame(data={
+            'filename': filename_log,
+            'pred': pred_log, 'conf': conf_log,
+            'face': face_log, 'label': label_log
+        })
+
+        export_path = f'stats/all-{tag}-{date_stamp}.csv'
+        df.to_csv(export_path, index=False)
+        print(f'all sync preds exported to {export_path}')
+
+    def export_video_preds(self, date_stamp=None, tag='test'):
         if date_stamp is None:
             date_stamp = self.make_date_stamp()
 
@@ -359,21 +409,69 @@ class VideoSyncPredictor(object):
             'face_no': self.face_log
         })
 
-        export_path = f'../stats/sync-vid-preds-{date_stamp}.csv'
+        export_path = f'stats/vid-{tag}-{date_stamp}.csv'
         df.to_csv(export_path, index=False)
-        print(f'sync preds exported to {export_path}')
+        print(f'video sync preds exported to {export_path}')
 
-    def start(self):
+    def start_mono(self):
         date_stamp = self.make_date_stamp()
 
         self.extractor.process_filepaths(
             self.filenames, every_n_frames=1,
-            skip_detect=10, ignore_detect=5, export_size=96,
+            skip_detect=10, ignore_detect=5, export_size=224,
             callback=self.on_faces_loaded,
             base_dir='../datasets/train/videos'
         )
 
-        self.store_preds(date_stamp)
+        self.export_video_preds(date_stamp)
+
+    def infer_videos(
+        self, filenames=None, clip=None, samples_batch_size=32,
+        face_batch_size=32, use_mouth_image=True
+    ):
+        if filenames is None:
+            filenames = self.filenames
+        if clip is not None:
+            filenames = filenames[:clip]
+
+        date_stamp = self.make_date_stamp()
+        samples_holder = FaceSamplesHolder(
+            predictor=self.trainer, batch_size=samples_batch_size,
+            use_mouth_image=use_mouth_image
+        )
+
+        mel_cache = MelCache()
+        mel_cache_path = 'saves/preprocessed/mel_cache_all.npy'
+        mel_cache.preload(mel_cache_path)
+        pbar = tqdm(filenames)
+
+        for filename in pbar:
+            face_image_map = self.extractor.process_filepath(
+                filename, batch_size=face_batch_size,
+                every_n_frames=1, skip_detect=10, ignore_detect=5,
+                export_size=256, base_dir='../datasets/train/videos'
+            )
+
+            cct = mel_cache[filename]
+
+            for face_no in face_image_map:
+                face_samples = face_image_map.sample_face_frames(
+                    face_no, consecutive_frames=5, extract=False,
+                    max_samples=32
+                )
+                samples_holder.add_face_samples(
+                    filename, face_samples=face_samples, mel=cct,
+                    face_no=face_no, fps=face_image_map.fps
+                )
+
+            del face_image_map
+            gc.collect()
+
+        samples_holder.flush()
+        return self._collate_samples(
+            samples_holder, date_stamp=date_stamp,
+            csv_tag='orig'
+        )
 
 
 """
@@ -403,6 +501,13 @@ mean pred: 0.6550164818763733
 accuracy: 0.375
 percent fake: 0.24074074074074073
 
+211202-0328/E8554752_T0.78_V0.68.pt [C32]
+---------------------------------
+video mean error: 0.39455374074168503
+video mean squared error: 2.828592335567301
+video mean pred: 0.5337652564048767
+video accuracy: 0.625
+percent vid fake: 0.1875
 """
 
 if __name__ == '__main__':
@@ -413,5 +518,5 @@ if __name__ == '__main__':
 
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
-    sync_predictor.profile_infer(clip=64, batch_size=32)
-    # sync_predictor.profile_start()
+    sync_predictor.profile_infer(batch_size=32, max_samples=None)
+    # sync_predictor.profile_infer_videos(clip=32)

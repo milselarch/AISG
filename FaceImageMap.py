@@ -81,6 +81,9 @@ class FaceImageMap(object):
         require_first_detected=True, extract=False, clip_p=0,
         min_samples=20, clip_start=True, clip_end=True
     ):
+        if max_samples is None:
+            max_samples = float('inf')
+
         face_frames = self.get_face_frames(face_no)
         allowed_frame_nos = []
 
