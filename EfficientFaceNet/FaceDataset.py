@@ -460,13 +460,37 @@ class FaceDataset(object):
         image_path = random.choice(image_paths)
         return image_path
 
-    def load_image_paths(self, label, samples=1, is_training=True):
+    def load_image_paths(self, *args, **kwargs):
+        return self.load_image_paths_v1(*args, **kwargs)
+
+    def load_image_paths_v2(
+        self, label, samples=1, is_training=True
+    ):
         assert label in (0, 1)
-        image_paths = []
+        img_samples = []
 
         for k in range(samples):
-            image_paths.append(self.load_image_path(
+            img_samples.append(self.load_image_path(
                 label, is_training=is_training
             ))
 
-        return image_paths
+        return img_samples
+
+    def load_image_paths_v1(
+        self, label, samples=1, is_training=True
+    ):
+        assert label in (0, 1)
+
+        if is_training:
+            if label == 0:
+                filenames = self.real_train_images
+            else:
+                filenames = self.fake_train_images
+        else:
+            if label == 0:
+                filenames = self.real_test_images
+            else:
+                filenames = self.fake_test_images
+
+        img_samples = random.sample(filenames, samples)
+        return img_samples
