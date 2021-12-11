@@ -142,12 +142,12 @@ class FaceTrainer(object):
 
             preds = self.model(sub_batch)
             loss = self.criterion(preds, sub_labels)
+            loss_value = loss.item()
+            total_loss += loss_value
+
             loss_scale = len(sub_labels) / batch_size
             sub_mean_loss = loss * loss_scale
             sub_mean_loss.backward()
-
-            loss_value = loss.item()
-            total_loss += loss_value
 
             detach_preds = preds.detach().cpu().numpy().flatten()
             all_preds.append(detach_preds)
