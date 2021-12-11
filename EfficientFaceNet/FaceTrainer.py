@@ -110,6 +110,18 @@ class FaceTrainer(object):
         if eval_mode:
             self.model.eval()
 
+    def feed_predict(self, torch_batch_x):
+        index, all_preds = 0, []
+
+        while index < len(torch_batch_x):
+            sub_batch = torch_batch_x[index: index+self.feed_size]
+            preds = self.model(sub_batch)
+            all_preds.append(preds)
+            index += self.feed_size
+
+        all_preds = torch.cat(all_preds)
+        return all_preds
+
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
         record=False
@@ -142,12 +154,12 @@ class FaceTrainer(object):
 
             preds = self.model(sub_batch)
             loss = self.criterion(preds, sub_labels)
-            loss_value = loss.item()
-            total_loss += loss_value
-
             loss_scale = len(sub_labels) / batch_size
             sub_mean_loss = loss * loss_scale
             sub_mean_loss.backward()
+
+            loss_value = loss.item()
+            total_loss += loss_value
 
             detach_preds = preds.detach().cpu().numpy().flatten()
             all_preds.append(detach_preds)
@@ -180,7 +192,6 @@ class FaceTrainer(object):
         torch_labels = torch.tensor(np_labels).float()
         torch_labels = torch_labels.to(self.device).detach()
 
-        total_loss = 0
         # self.optimizer.zero_grad()
         self.model.train(False)
 
@@ -188,15 +199,12 @@ class FaceTrainer(object):
             preds = self.model(torch_batch_x)
             loss = self.criterion(preds, torch_labels)
             loss_value = loss.item()
-            total_loss += loss_value
 
         self.model.train(True)
-        mean_loss = total_loss / batch_size
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = np_labels.flatten()
-
         score = self.record_metrics(
-            episode_no, mean_loss, np_preds, flat_labels,
+            episode_no, loss_value, np_preds, flat_labels,
             callback=self.record_validate_errors
         )
 
