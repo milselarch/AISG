@@ -201,10 +201,12 @@ class FaceTrainer(object):
             loss_value = loss.item()
 
         self.model.train(True)
+        mean_loss = loss_value / batch_size
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = np_labels.flatten()
+
         score = self.record_metrics(
-            episode_no, loss_value, np_preds, flat_labels,
+            episode_no, mean_loss, np_preds, flat_labels,
             callback=self.record_validate_errors
         )
 
