@@ -54,6 +54,11 @@ class FaceDataset(object):
         self.real_test_images = None
         self.fake_test_images = None
 
+        self.real_train_files = None
+        self.fake_train_files = None
+        self.real_test_files = None
+        self.fake_test_files = None
+
         self.talker_face_map = None
 
         if load:
@@ -245,6 +250,8 @@ class FaceDataset(object):
         image_paths_map = {}
         skipped_files, trainable_files = 0, 0
         self.all_filenames = []
+        # self.real_filenames = []
+        # self.fake_filenames = []
 
         for item in os.walk(self.face_dir):
             folder_path, dirs, image_names = item
@@ -319,6 +326,16 @@ class FaceDataset(object):
         self.train_test_split()
 
     def train_test_split(self):
+        self.real_train_files = []
+        self.fake_train_files = []
+        self.real_test_files = []
+        self.fake_test_files = []
+
+        self.real_train_images = []
+        self.fake_train_images = []
+        self.real_test_images = []
+        self.fake_test_images = []
+
         fake_labels = [1] * len(self.all_filenames)
         x_train, x_test, _, _ = train_test_split(
             self.all_filenames, fake_labels,
@@ -327,11 +344,6 @@ class FaceDataset(object):
 
         self.train_files = x_train
         self.test_files = x_test
-
-        self.real_train_images = []
-        self.fake_train_images = []
-        self.real_test_images = []
-        self.fake_test_images = []
 
         for filename in self.all_filenames:
             fake_image_paths, real_image_paths = [], []
@@ -344,9 +356,21 @@ class FaceDataset(object):
             if filename in self.train_files:
                 self.fake_train_images.extend(fake_image_paths)
                 self.real_train_images.extend(real_image_paths)
+
+                if len(real_image_paths) > 0:
+                    self.real_train_files.append(filename)
+                if len(fake_image_paths) > 0:
+                    self.fake_train_files.append(filename)
+
             elif filename in self.test_files:
                 self.fake_test_images.extend(fake_image_paths)
                 self.real_test_images.extend(real_image_paths)
+
+                if len(real_image_paths) > 0:
+                    self.real_test_files.append(filename)
+                if len(fake_image_paths) > 0:
+                    self.fake_test_files.append(filename)
+
             else:
                 raise ValueError(
                     f'{filename} NOT IN TRAIN / TEST'
@@ -365,10 +389,10 @@ class FaceDataset(object):
         fake_count = int(batch_size * fake_p)
         real_count = batch_size - fake_count
 
-        real_paths = self.load_filenames(
+        real_paths = self.load_image_paths(
             0, samples=real_count, is_training=is_training
         )
-        fake_paths = self.load_filenames(
+        fake_paths = self.load_image_paths(
             1, samples=fake_count, is_training=is_training
         )
 
@@ -413,19 +437,36 @@ class FaceDataset(object):
 
             return img.convert('RGB')
 
-    def load_filenames(self, label, samples=1, is_training=True):
+    def load_image_path(self, label, is_training=True):
         assert label in (0, 1)
 
-        if is_training:
-            if label == 0:
-                filenames = self.real_train_images
-            else:
-                filenames = self.fake_train_images
-        else:
-            if label == 0:
-                filenames = self.real_test_images
-            else:
-                filenames = self.fake_test_images
+        if label == 0:
+            file_map = self.real_files
 
-        samples = random.sample(filenames, samples)
-        return samples
+            if is_training:
+                filenames = self.real_train_files
+            else:
+                filenames = self.real_test_files
+        else:
+            file_map = self.fake_files
+
+            if is_training:
+                filenames = self.fake_train_files
+            else:
+                filenames = self.fake_test_files
+
+        filename = random.choice(filenames)
+        image_paths = file_map[filename]
+        image_path = random.choice(image_paths)
+        return image_path
+
+    def load_image_paths(self, label, samples=1, is_training=True):
+        assert label in (0, 1)
+        image_paths = []
+
+        for k in range(samples):
+            image_paths.append(self.load_image_path(
+                label, is_training=is_training
+            ))
+
+        return image_paths
