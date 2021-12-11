@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 import random
 import numpy as np
 import pandas as pd
-import cv2
+import os
 
 from tqdm.auto import tqdm
 from torchvision import transforms
@@ -19,25 +19,28 @@ from sklearn.model_selection import train_test_split
 from datetime import datetime as Datetime
 from PIL import Image, ImageOps
 
-class Dataset(object):
+class FaceDataset(object):
     def __init__(self, train_size=0.9, seed=42, load=True):
         self.train_size = train_size
         self.seed = seed
 
         self.transform = transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5] * 3, [0.5] * 3)
-        ])
+            transforms.Resize(224), transforms.ToTensor(),
+            transforms.Normalize(
+                [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+            )]
+        )
 
         self.face_path = '../stats/all-labels.csv'
         # self.detect_path = '../stats/sorted-detections.csv'
-        self.detect_path = '../stats/labelled-mtcnn.csv'
-        self.face_dir = '../datasets/extract/mtcnn-faces'
+        self.detect_path = '../stats/mtcnn/labelled-mtcnn.csv'
+        self.face_dir = '../datasets/extract/mtcnn-sync'
 
         self.real_files = None
         self.fake_files = None
         self.img_labels = None
+
+        self.all_filenames = None
         self.real_filenames = None
         self.fake_filenames = None
 
@@ -50,6 +53,8 @@ class Dataset(object):
         self.fake_train_images = None
         self.real_test_images = None
         self.fake_test_images = None
+
+        self.talker_face_map = None
 
         if load:
             self.load_datasets()
@@ -148,7 +153,65 @@ class Dataset(object):
         detections.to_csv(path, index=False)
         print(f'face predictions exported to {path}')
 
+    def load_talker_face_map(self):
+        # face_cluster = FaceCluster(load_datasets=False)
+        # labels_map = face_cluster.get_orig_labels(self.labels_path)
+
+        detections = pd.read_csv(self.detect_path)
+        file_column = detections['filename'].to_numpy()
+        face_column = detections['face'].to_numpy()
+        # frame_column = detections['frame'].to_numpy()
+        talker_column = detections['talker'].to_numpy()
+        num_faces_column = detections['num_faces'].to_numpy()
+
+        talker_face_map = {}
+        filenames = []
+
+        for k in tqdm(range(len(file_column))):
+            filename = file_column[k]
+            # is_fake = labels_map[filename]
+            is_talker = talker_column[k]
+            num_faces = num_faces_column[k]
+            face_no = face_column[k]
+
+            if filename in filenames:
+                continue
+
+            if num_faces > 1:
+                assert is_talker != -1
+
+                if is_talker == 1:
+                    talker_face_map[filename] = face_no
+                    filenames.append(filename)
+                    continue
+            else:
+                talker_face_map[filename] = 0
+                filenames.append(filename)
+
+        self.talker_face_map = talker_face_map
+        return talker_face_map
+
+    @staticmethod
+    def extract_frame(filename):
+        base_filename = os.path.basename(filename)
+        name = base_filename[:base_filename.index('.')]
+        face_no, frame_no = [int(x) for x in name.split('-')]
+        return face_no, frame_no
+
+    @classmethod
+    def get_frame_no(cls, filename):
+        face_no, frame_no = cls.extract_frame(filename)
+        return frame_no
+
+    @classmethod
+    def get_face_no(cls, filename):
+        face_no, frame_no = cls.extract_frame(filename)
+        return face_no
+
     def load_datasets(self):
+        if self.talker_face_map is None:
+            self.load_talker_face_map()
+
         face_cluster = FaceCluster(load_datasets=False)
         face_path = self.face_path
         face_map = face_cluster.make_face_map(face_path)
@@ -179,6 +242,15 @@ class Dataset(object):
                 'num_faces': num_faces_column[k]
             })
 
+        image_paths_map = {}
+        skipped_files, trainable_files = 0, 0
+        self.all_filenames = []
+
+        for item in os.walk(self.face_dir):
+            folder_path, dirs, image_names = item
+            # folder_name = os.path.basename(folder_path)
+            image_paths_map[folder_path] = image_names
+
         for filename in tqdm(face_map):
             if filename not in file_map:
                 continue
@@ -186,6 +258,13 @@ class Dataset(object):
             face_fake = face_map[filename]
             frames = file_map[filename]
             unique_face_nos = frames[0]['num_faces']
+
+            if face_fake in (0, 1):
+                self.all_filenames.append(filename)
+                trainable_files += 1
+            else:
+                skipped_files += 1
+                continue
 
             if unique_face_nos == 2:
                 self.real_files[filename] = []
@@ -197,15 +276,29 @@ class Dataset(object):
             else:
                 continue
 
-            for k in range(len(frames)):
-                frame_no = frames[k]['frame']
-                is_talker = frames[k]['talker']
-                face_no = frames[k]['face']
+            name = filename[:filename.rindex('.')]
+            face_folder_path = f'{self.face_dir}/{name}'
+            image_names = image_paths_map[face_folder_path]
+            # image_names = os.listdir(face_folder_path)
 
-                name = filename[:filename.index('.')]
-                img_file = f'{name}/{face_no}-{frame_no}.jpg'
-                img_path = f'{self.face_dir}/{img_file}'
-                assert unique_face_nos < 3
+            image_face_nos = np.unique([
+                self.get_face_no(image_name)
+                for image_name in image_names
+            ])
+
+            assert unique_face_nos < 3
+            talker_face_no = face_map[filename]
+            num_image_face_nos = len(image_face_nos)
+
+            if num_image_face_nos == 2:
+                assert unique_face_nos == num_image_face_nos
+
+            for k, image_name in enumerate(image_names):
+                img_path = f'{face_folder_path}/{image_name}'
+                face_no, frame_no = self.extract_frame(image_name)
+                is_talker = face_no == talker_face_no
+                # img_file = f'{name}/{face_no}-{frame_no}.jpg'
+                # img_path = f'{self.face_dir}/{img_file}'
 
                 if face_fake == 0:
                     label = 0
@@ -221,37 +314,43 @@ class Dataset(object):
 
                 self.img_labels[img_path] = label
 
+        print(f'trainable files: {trainable_files}')
+        print(f'skipped files: {skipped_files}')
         self.train_test_split()
 
     def train_test_split(self):
-        all_filenames = list(self.img_labels.keys())
-        all_labels = list(self.img_labels.values())
-        x_train, x_test, y_train, y_test = train_test_split(
-            all_filenames, all_labels,
+        fake_labels = [1] * len(self.all_filenames)
+        x_train, x_test, _, _ = train_test_split(
+            self.all_filenames, fake_labels,
             random_state=self.seed, train_size=self.train_size
         )
 
         self.train_files = x_train
-        self.train_labels = y_train
         self.test_files = x_test
-        self.test_labels = y_test
 
         self.real_train_images = []
         self.fake_train_images = []
         self.real_test_images = []
         self.fake_test_images = []
 
-        for img_path, label in tqdm(zip(x_train, y_train)):
-            if label == 0:
-                self.real_train_images.append(img_path)
-            elif label == 1:
-                self.fake_train_images.append(img_path)
+        for filename in self.all_filenames:
+            fake_image_paths, real_image_paths = [], []
 
-        for img_path, label in tqdm(zip(x_test, y_test)):
-            if label == 0:
-                self.real_test_images.append(img_path)
-            elif label == 1:
-                self.fake_test_images.append(img_path)
+            if filename in self.fake_files:
+                fake_image_paths = self.fake_files[filename]
+            if filename in self.real_files:
+                real_image_paths = self.real_files[filename]
+
+            if filename in self.train_files:
+                self.fake_train_images.extend(fake_image_paths)
+                self.real_train_images.extend(real_image_paths)
+            elif filename in self.test_files:
+                self.fake_test_images.extend(fake_image_paths)
+                self.real_test_images.extend(real_image_paths)
+            else:
+                raise ValueError(
+                    f'{filename} NOT IN TRAIN / TEST'
+                )
 
         print(f'real train images {len(self.real_train_images)}')
         print(f'fake train images {len(self.fake_train_images)}')
@@ -304,49 +403,6 @@ class Dataset(object):
 
         np_labels = np.expand_dims(np_labels, axis=1)
         return np_images, np_labels
-
-    @staticmethod
-    def m_print(cond, *args, **kwargs):
-        if cond:
-            print(*args, **kwargs)
-
-    @classmethod
-    def load_image(
-        cls, img, size, mirror_prob=0,
-        verbose=False, bottom_half=False, assert_square=True,
-        bgr_to_rgb=True
-    ):
-        if type(img) is str:
-            img = cv2.imread(img)
-
-        if bgr_to_rgb:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        height, width = img.shape[0], img.shape[1]
-        resize_width, resize_height = size, size
-
-        if bottom_half:
-            if height != width:
-                assert height == width // 2
-                resize_height = size // 2
-            else:
-                assert not assert_square or (width == height)
-                img = img[height // 2:, :]
-        else:
-            assert not assert_square or (width == height)
-
-        if size is not None:
-            img = cv2.resize(
-                img, (resize_width, resize_height)
-            )
-
-        if random.random() < mirror_prob:
-            cls.m_print(verbose, 'FLIP')
-            img = cv2.flip(img, 1)
-        else:
-            cls.m_print(verbose, 'NO_FLIP')
-
-        return img
 
     @staticmethod
     def pil_loader(path: str, mirror_prob=0.5) -> Image.Image:
