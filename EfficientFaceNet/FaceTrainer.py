@@ -45,7 +45,7 @@ class FaceTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01,
-        preload_path=None, model_type='s'
+        preload_path=None, model_type='m'
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -413,7 +413,7 @@ class FaceTrainer(object):
         return Datetime.now().strftime("%y%m%d-%H%M")
 
     def tensorboard_start(self):
-        log_dir = f'saves/logs/MES-{self.date_stamp}'
+        log_dir = f'saves/logs/EFF-{self.date_stamp}'
         train_path = log_dir + '/training'
         valid_path = log_dir + '/validation'
         self.tfile_writer = tf.summary.create_file_writer(train_path)
