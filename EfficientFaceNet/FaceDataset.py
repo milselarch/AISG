@@ -461,7 +461,7 @@ class FaceDataset(object):
         return image_path
 
     def load_image_paths(self, *args, **kwargs):
-        return self.load_image_paths_v1(*args, **kwargs)
+        return self.load_image_paths_v2(*args, **kwargs)
 
     def load_image_paths_v2(
         self, label, samples=1, is_training=True
