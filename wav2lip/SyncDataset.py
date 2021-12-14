@@ -433,11 +433,12 @@ class SyncDataset(object):
     @staticmethod
     def batch_images_joon(
         images, mirror_prob=0.5, torchify=True, size=224,
-        transform_image=None
+        transform_image=None, swap_rgb=False
     ):
         return BaseDataset.batch_image_window_joon(
             images, mirror_prob=mirror_prob, torchify=torchify,
-            size=size, transform_image=transform_image
+            size=size, transform_image=transform_image,
+            swap_rgb=swap_rgb
         )
 
     def resolve_fps(self, filename):
