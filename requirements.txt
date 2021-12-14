@@ -217,3 +217,4 @@ zipp==1.0.0
 
 dlib~=19.22.1
 mediapipe~=0.8.9
+torchsummary~=1.5.1

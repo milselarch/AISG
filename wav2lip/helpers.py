@@ -72,8 +72,12 @@ class WeightedLogitsBCE(Module):
         if weight is None:
             weight = torch.ones(preds.shape)
 
-        assert len(weight.shape) == 1
-        assert (weight >= 0).all()
+        try:
+            assert len(weight.shape) == 1
+            assert (weight >= 0).all()
+        except AssertionError as e:
+            print(f'BAD WEIGHT {weight}')
+            raise e
 
         safe_weight = weight + self.min_weight
         # scale weights such that sum of weights is 1

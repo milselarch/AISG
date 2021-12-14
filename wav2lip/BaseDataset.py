@@ -77,6 +77,7 @@ class MelCache(object):
         if use_joon and (self.cache['cache_type'] != 'cct'):
             raise ValueError('NOT USING JOON')
 
+
 class BaseDataset(object):
     __ID = 0
     transform_image = transforms.Normalize(

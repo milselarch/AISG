@@ -1,16 +1,15 @@
 try:
     import ParentImport
 
-    from Dataset import Dataset
-    from network.classifier import *
-    from network.transform import mesonet_data_transforms
+    import effnetv2
+
+    from FaceDataset import FaceDataset
 
 except ModuleNotFoundError:
     from . import ParentImport
 
-    from .Dataset import Dataset
-    from .network.classifier import *
-    from .network.transform import mesonet_data_transforms
+    from . import effnetv2
+    from .FaceDataset import FaceDataset
 
 try:
     # need it for tensorboard
@@ -25,6 +24,7 @@ import torch.nn as nn
 import torchvision
 import torch.optim as optim
 import argparse
+import math
 import time
 import cv2
 import os
@@ -41,17 +41,17 @@ def round_sig(x, sig=2):
     return round(x, sig - int(math.floor(math.log10(abs(x)))) - 1)
 
 
-class MesoTrainer(object):
+class FaceTrainer(object):
     def __init__(
         self, seed=420, test_p=0.05, use_cuda=True,
         valid_p=0.05, load_dataset=True, save_threshold=0.01,
-        use_inception=False, preload_path=None
+        preload_path=None, model_type='m'
     ):
         self.date_stamp = self.make_date_stamp()
-        self.use_inception = use_inception
 
-        self.name = 'Mesonet'
-        self.batch_size = 64
+        self.name = 'EfficientNet'
+        self.batch_size = 32
+        self.feed_size = 8
         self.epochs = 50
 
         self.accum_train_score = 0
@@ -69,15 +69,18 @@ class MesoTrainer(object):
 
         torch.backends.cudnn.benchmark = True
         self.use_cuda = use_cuda
+        self.model_type = model_type
 
-        if use_inception:
-            self.model = MesoInception4(
-                num_classes=1, use_sigmoid=True
-            )
+        if model_type == 's':
+            self.model = effnetv2.effnetv2_s(num_classes=1)
+        elif model_type == 'm':
+            self.model = effnetv2.effnetv2_m(num_classes=1)
+        elif model_type == 'l':
+            self.model = effnetv2.effnetv2_l(num_classes=1)
+        elif model_type == 'xl':
+            self.model = effnetv2.effnetv2_xl(num_classes=1)
         else:
-            self.model = Meso4(
-                num_classes=1, use_sigmoid=True
-            )
+            raise ValueError(f'BAD MODEL SIZE {model_type}')
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -86,7 +89,7 @@ class MesoTrainer(object):
             self.device = torch.device("cpu")
 
         # self.criterion = nn.CrossEntropyLoss()
-        self.criterion = nn.BCELoss()
+        self.criterion = nn.BCELoss(reduction='sum')
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=0.001,
             betas=(0.9, 0.999), eps=1e-08
@@ -95,7 +98,7 @@ class MesoTrainer(object):
             self.optimizer, step_size=5, gamma=0.5
         )
 
-        self.dataset = Dataset(seed=seed, load=load_dataset)
+        self.dataset = FaceDataset(seed=seed, load=load_dataset)
         if preload_path is not None:
             self.load_model(preload_path)
 
@@ -103,16 +106,30 @@ class MesoTrainer(object):
         return self.dataset.transform(image)
 
     def load_model(self, model_path, eval_mode=True):
-        self.model.load_state_dict(torch.load(
-            model_path, map_location=self.device
-        ))
+        self.model.load_state_dict(torch.load(model_path))
         if eval_mode:
             self.model.eval()
+
+    def feed_predict(self, torch_batch_x):
+        index, all_preds = 0, []
+
+        while index < len(torch_batch_x):
+            sub_batch = torch_batch_x[index: index+self.feed_size]
+            preds = self.model(sub_batch)
+            all_preds.append(preds)
+            index += self.feed_size
+
+        all_preds = torch.cat(all_preds)
+        return all_preds
 
     def batch_train(
         self, episode_no, batch_size=None, fake_p=0.5,
         record=False
     ):
+        """
+        https://towardsdatascience.com/
+        i-am-so-done-with-cuda-out-of-memory-c62f42947dca
+        """
         if batch_size is None:
             batch_size = self.batch_size
 
@@ -125,20 +142,36 @@ class MesoTrainer(object):
         torch_batch_x = torch.tensor(batch_x).to(self.device)
         torch_labels = torch.tensor(np_labels).float()
         torch_labels = torch_labels.to(self.device).detach()
-        preds = self.model(torch_batch_x)
 
+        index, total_loss = 0, 0
+        counter, all_preds = 0, []
         self.optimizer.zero_grad()
-        loss = self.criterion(preds, torch_labels)
-        loss_value = loss.item()
-        loss.backward()
-        self.optimizer.step()
 
+        while index < len(torch_batch_x):
+            sub_batch = torch_batch_x[index: index+self.feed_size]
+            sub_labels = torch_labels[index: index+self.feed_size]
+            index += self.feed_size
+
+            preds = self.model(sub_batch)
+            loss = self.criterion(preds, sub_labels)
+            loss_scale = len(sub_labels) / batch_size
+            sub_mean_loss = loss * loss_scale
+            sub_mean_loss.backward()
+
+            loss_value = loss.item()
+            total_loss += loss_value
+
+            detach_preds = preds.detach().cpu().numpy().flatten()
+            all_preds.append(detach_preds)
+
+        self.optimizer.step()
+        mean_loss = total_loss / batch_size
         callback = self.record_train_errors if record else None
 
-        np_preds = preds.detach().cpu().numpy().flatten()
+        np_preds = np.concatenate(all_preds)
         flat_labels = np_labels.flatten()
         score = self.record_metrics(
-            episode_no, loss_value, np_preds, flat_labels,
+            episode_no, mean_loss, np_preds, flat_labels,
             callback=callback
         )
 
@@ -168,10 +201,12 @@ class MesoTrainer(object):
             loss_value = loss.item()
 
         self.model.train(True)
+        mean_loss = loss_value / batch_size
         np_preds = preds.detach().cpu().numpy().flatten()
         flat_labels = np_labels.flatten()
+
         score = self.record_metrics(
-            episode_no, loss_value, np_preds, flat_labels,
+            episode_no, mean_loss, np_preds, flat_labels,
             callback=self.record_validate_errors
         )
 
@@ -380,7 +415,7 @@ class MesoTrainer(object):
         return Datetime.now().strftime("%y%m%d-%H%M")
 
     def tensorboard_start(self):
-        log_dir = f'saves/logs/MES-{self.date_stamp}'
+        log_dir = f'saves/logs/EFF-{self.date_stamp}'
         train_path = log_dir + '/training'
         valid_path = log_dir + '/validation'
         self.tfile_writer = tf.summary.create_file_writer(train_path)
@@ -401,10 +436,24 @@ class MesoTrainer(object):
         squared_error = np.sum((np_preds - flat_labels) ** 2)
         mse = (squared_error / errors.size) ** 0.5
 
+        real_indexes = np.where(flat_labels == 0)
+        fake_indexes = np.where(flat_labels == 1)
+        real_preds = np_preds[real_indexes]
+        fake_preds = np_preds[fake_indexes]
+        real_acc, fake_acc = 0, 0
+
+        if len(real_preds) > 0:
+            correct = 1 - np.round(real_preds)
+            real_acc = sum(correct) / len(real_preds)
+        if len(fake_preds) > 0:
+            correct = np.round(fake_preds)
+            fake_acc = sum(correct) / len(real_preds)
+
         if callback is not None:
             callback(
                 step=episode_no, loss=loss_value,
-                me=me, mse=mse, accuracy=accuracy
+                me=me, mse=mse, accuracy=accuracy,
+                real_acc=real_acc, fake_acc=fake_acc
             )
 
         score = 2 * accuracy - 1
@@ -422,7 +471,7 @@ class MesoTrainer(object):
 
     def record_errors(
         self, file_writer, step, loss, me=-1, mse=-1,
-        accuracy=-1
+        accuracy=-1, real_acc=0, fake_acc=0
     ):
         assert self.tensorboard_started
         score = 2 * accuracy - 1
@@ -436,4 +485,6 @@ class MesoTrainer(object):
                 'mean_squared_error', data=mse, step=step
             )
 
+            tf.summary.scalar('real acc', data=real_acc, step=step)
+            tf.summary.scalar('fake acc', data=fake_acc, step=step)
             file_writer.flush()
