@@ -65,7 +65,7 @@ class SyncDataset(object):
         face_base_dir='../datasets/extract/mtcnn-faces',
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
-        mel_cache_path=None, transform_image=False
+        mel_cache_path=None, transform_image=False, to_rgb=False
     ):
         assert train_workers % 2 == 0
         assert test_workers % 2 == 0
@@ -76,6 +76,7 @@ class SyncDataset(object):
         self.test_workers = test_workers
         self.transform_image = transform_image
         self.use_joon = use_joon
+        self.to_rgb = to_rgb
 
         self.transform = transforms.Compose([
             transforms.Resize((256, 256)),
@@ -392,9 +393,10 @@ class SyncDataset(object):
 
             return img.convert('RGB')
 
-    @staticmethod
-    def cv_loader(*args, **kwargs):
-        return BaseDataset._cv_loader(*args, **kwargs)
+    def cv_loader(self, *args, **kwargs):
+        return BaseDataset._cv_loader(
+            *args, bgr_to_rgb=self.to_rgb, **kwargs
+        )
 
     @staticmethod
     def load_cct(*args, **kwargs):

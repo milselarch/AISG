@@ -82,7 +82,7 @@ class SyncnetTrainer(object):
         old_joon=True, dropout_p=0.0, transform_image=False,
         fcc_list=None, predict_confidence=False,
         binomial_train_sampling=True, binomial_test_sampling=False,
-        eval_mode=False
+        eval_mode=False, to_rgb=False
     ):
         self.date_stamp = self.make_date_stamp()
 
@@ -117,9 +117,11 @@ class SyncnetTrainer(object):
         self.mel_cache_path = mel_cache_path
 
         torch.backends.cudnn.benchmark = True
+
         self.use_joon = use_joon
         self.old_joon = old_joon
         self.use_cuda = use_cuda
+        self.to_rgb = to_rgb
 
         if use_joon:
             if old_joon:
@@ -170,7 +172,7 @@ class SyncnetTrainer(object):
             seed=seed, load=load_dataset,
             train_workers=train_workers, test_workers=test_workers,
             mel_step_size=mel_step_size, use_joon=self.use_joon,
-            face_base_dir=self.face_base_dir,
+            face_base_dir=self.face_base_dir, to_rgb=self.to_rgb,
             video_base_dir=self.video_base_dir,
             audio_base_dir=self.audio_base_dir,
             mel_cache_path=self.mel_cache_path,
@@ -197,7 +199,10 @@ class SyncnetTrainer(object):
         return self.dataset.transform(image)
 
     def load_model(self, model_path, eval_mode=False):
-        self.model.load_state_dict(torch.load(model_path))
+        self.model.load_state_dict(torch.load(
+            model_path, map_location=self.device
+        ))
+
         if eval_mode:
             self.enter_val_model()
 
@@ -628,6 +633,29 @@ class SyncnetTrainer(object):
         print(f'time taken: {round(time_taken, 2)}s')
         print(f'time per eps: {round(time_per_episode, 3)}s')
 
+    @staticmethod
+    def fetch_percentile(z, values):
+        values = sorted(values)
+
+        for k, value in enumerate(values):
+            if z < value:
+                progress = k / len(values)
+                return progress
+
+        return 1
+
+    @classmethod
+    def get_percentiles(cls, preds, thresholds=None):
+        if thresholds is None:
+            thresholds = [k / 10 for k in range(1, 10)]
+
+        all_percentiles = []
+        for threshold in thresholds:
+            percentile = cls.fetch_percentile(threshold, preds)
+            all_percentiles.append(percentile)
+
+        return all_percentiles
+
     def validate(
         self, episodes=10 * 1000, batch_size=None,
         fake_p=0.5, use_train_data=False, mono_filename=False
@@ -682,6 +710,17 @@ class SyncnetTrainer(object):
         print(f'mean error: {me}')
         print(f'mean squared error: {mse}')
         print(f'average pred: {mean_pred}')
+
+        thresholds = self.get_percentiles(all_preds)
+        print(f'predict thresholds: {thresholds}')
+
+        real_preds = all_preds[np.where(all_labels == 0)]
+        fake_preds = all_preds[np.where(all_labels == 1)]
+        real_thresholds = self.get_percentiles(real_preds)
+        fake_thresholds = self.get_percentiles(fake_preds)
+        print(f'real pred percentiles: {real_thresholds}')
+        print(f'fake pred percentiles: {fake_thresholds}')
+        print('DONE')
 
     @staticmethod
     def get_smooth_score(accum_score, decay, eps):
