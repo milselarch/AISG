@@ -535,7 +535,7 @@ class BaseDataset(object):
     @classmethod
     def batch_image_window_joon(
         cls, images, mirror_prob=0.5, size=224, torchify=True,
-        transform_image=None
+        transform_image=None, swap_rgb=False
     ):
         if transform_image is None:
             transform_image = cls.transform_image
@@ -550,7 +550,8 @@ class BaseDataset(object):
             try:
                 image = cls._cv_loader(
                     image, mirror_prob=flip, size=size,
-                    assert_square=True, bottom_half=False
+                    assert_square=True, bottom_half=False,
+                    bgr_to_rgb=swap_rgb
                 )
             except AssertionError as e:
                 print('CV LOAD FAILED')

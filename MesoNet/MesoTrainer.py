@@ -103,7 +103,9 @@ class MesoTrainer(object):
         return self.dataset.transform(image)
 
     def load_model(self, model_path, eval_mode=True):
-        self.model.load_state_dict(torch.load(model_path))
+        self.model.load_state_dict(torch.load(
+            model_path, map_location=self.device
+        ))
         if eval_mode:
             self.model.eval()
 

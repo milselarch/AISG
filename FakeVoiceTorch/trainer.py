@@ -82,10 +82,11 @@ class Trainer(BaseTrainer):
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
-            self.model = self.model.cuda()
         else:
             self.device = torch.device("cpu")
 
+        print(f'AUDIO PREDICTOR LOADED USING {self.device}')
+        self.model = self.model.to(self.device)
         self.add_aisg = add_aisg
         self.use_avs = use_avs
 
@@ -106,7 +107,9 @@ class Trainer(BaseTrainer):
             self.load_model(preload_path)
 
     def load_model(self, model_path, eval_mode=True):
-        self.model.load_state_dict(torch.load(model_path))
+        self.model.load_state_dict(torch.load(
+            model_path, map_location=self.device
+        ))
         if eval_mode:
             self.model.eval()
 

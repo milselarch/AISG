@@ -197,7 +197,9 @@ class SyncnetTrainer(object):
         return self.dataset.transform(image)
 
     def load_model(self, model_path, eval_mode=False):
-        self.model.load_state_dict(torch.load(model_path))
+        self.model.load_state_dict(torch.load(
+            model_path, map_location=self.device
+        ))
         if eval_mode:
             self.enter_val_model()
 
@@ -384,7 +386,7 @@ class SyncnetTrainer(object):
         self, face_samples: List[List[FaceImage]],
         melspectogram, fps, transpose_audio=False, use_joon=None,
         is_raw_audio=False, to_device=True, auto_double=True,
-        use_mouth_image=False
+        use_mouth_image=False, swap_rgb=False
     ):
         if use_joon is None:
             use_joon = self.use_joon
@@ -415,7 +417,7 @@ class SyncnetTrainer(object):
 
             if use_joon:
                 torch_img_sample = self.dataset.batch_images_joon(
-                    raw_images, mirror_prob=0
+                    raw_images, mirror_prob=0, swap_rgb=swap_rgb
                 )
                 torch_mel_sample = self.dataset.load_mel_batch_joon(
                     melspectogram, fps=fps, frame_no=frame_no
