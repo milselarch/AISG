@@ -30,14 +30,19 @@ from BaseDataset import MelCache
 # preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
 # preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
 # preload_path = 'saves/checkpoints/211202-0328/E8554752_T0.78_V0.68.pt'
-preload_path = 'saves/checkpoints/211207-0123/E6668864_T0.9_V0.83.pt'
+# preload_path = 'saves/checkpoints/211207-0123/E6668864_T0.9_V0.83.pt'
+# preload_path = 'saves/checkpoints/211202-0328/E10695968_T0.84_V0.69.pt'
+preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
 
 class VideoSyncPredictor(object):
     def __init__(
-        self, seed=42, use_cuda=True,
-        face_base_dir='../datasets/extract/mtcnn-sync'
+        self, seed=42, use_cuda=True, mtcnn_cuda=True,
+        face_base_dir='../datasets/extract/mtcnn-sync',
+        use_mouth_image=True
     ):
-        self.extractor = NeuralFaceExtract()
+        self.extractor = NeuralFaceExtract(
+            use_cuda=mtcnn_cuda
+        )
         self.trainer = SyncnetTrainer(
             face_base_dir=face_base_dir,
             use_cuda=use_cuda, load_dataset=False,
@@ -47,10 +52,12 @@ class VideoSyncPredictor(object):
 
             fcc_list=(512, 128, 32),
             pred_ratio=1.0, dropout_p=0.5,
-            is_checkpoint=False, predict_confidence=True,
-            transform_image=True, eval_mode=False
+            is_checkpoint=False, predict_confidence=False,
+            transform_image=True, eval_mode=True
         )
 
+        self.mtcnn_cuda = mtcnn_cuda
+        self.use_mouth_image = use_mouth_image
         # self.trainer.model.disable_norm_toggle()
         self.face_base_dir = face_base_dir
         self.audio_base_dir = '../datasets/extract/audios-flac'
@@ -427,8 +434,10 @@ class VideoSyncPredictor(object):
 
     def infer_videos(
         self, filenames=None, clip=None, samples_batch_size=32,
-        face_batch_size=32, use_mouth_image=True
+        face_batch_size=32, use_mouth_image=None
     ):
+        if use_mouth_image is None:
+            use_mouth_image = self.use_mouth_image
         if filenames is None:
             filenames = self.filenames
         if clip is not None:
@@ -512,11 +521,13 @@ percent vid fake: 0.1875
 
 if __name__ == '__main__':
     sync_predictor = VideoSyncPredictor(
-        face_base_dir='../datasets/extract/mtcnn-lip',
-        use_cuda=False
+        face_base_dir='../datasets/extract/mtcnn-sync',
+        use_cuda=False, mtcnn_cuda=False,
+        use_mouth_image=False
     )
 
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
-    sync_predictor.profile_infer(batch_size=32, max_samples=None)
-    # sync_predictor.profile_infer_videos(clip=32)
+    # sync_predictor.profile_infer(batch_size=32, max_samples=None)
+    # sync_predictor.profile_infer(clip=32, batch_size=32)
+    sync_predictor.profile_infer_videos(clip=32)

@@ -1,6 +1,7 @@
 from SyncnetTrainer import SyncnetTrainer
 
-preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
+# preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
+preload_path = 'saves/checkpoints/211202-0328/E10695968_T0.84_V0.69.pt'
 
 """
 validation data: fake_p = 0
@@ -24,16 +25,19 @@ average pred: 0.7659800052642822
 
 if __name__ == '__main__':
     trainer = SyncnetTrainer(
-        train_workers=0, test_workers=0,
-        load_dataset=False, pred_ratio=1.0,
-        use_joon=True, old_joon=False, dropout_p=0.5,
-        fcc_list=(512, 128, 32),
+        use_cuda=False, load_dataset=False,
+        use_joon=True, old_joon=False,
+        preload_path=preload_path,
 
-        face_base_dir='../datasets/extract/mtcnn-sync',
+        face_base_dir='../datasets/extract/mtcnn-lip',
         video_base_dir='../datasets/train/videos',
         audio_base_dir='../datasets/extract/audios-flac',
         mel_cache_path='saves/preprocessed/mel_cache.npy',
-        transform_image=True, use_cuda=False
+
+        fcc_list=(512, 128, 32),
+        pred_ratio=1.0,  dropout_p=0.5,
+        is_checkpoint=False, predict_confidence=True,
+        transform_image=True, eval_mode=False
     )
 
     trainer.load_model(preload_path, eval_mode=False)
