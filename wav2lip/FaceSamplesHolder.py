@@ -4,9 +4,13 @@ try:
     import ParentImport
     import audio
 
+    from DeepfakeDetection.FaceExtractor import FaceImage
+
 except ModuleNotFoundError:
     from . import ParentImport
     from . import audio
+
+    from ..DeepfakeDetection.FaceExtractor import FaceImage
 
 import os
 import sys
@@ -18,6 +22,7 @@ import time
 import gc
 
 from tqdm.auto import tqdm
+from typing import Optional, List
 
 
 class Timer(object):
@@ -55,7 +60,7 @@ class Timer(object):
 class FaceSamplesHolder(object):
     def __init__(
         self, predictor, batch_size=16, use_mouth_image=False,
-        timer=None, garbage_collect_cct=True
+        timer=None, garbage_collect_cct=True, rgb_to_bgr=False
     ):
         if timer is None:
             timer = Timer()
@@ -64,6 +69,7 @@ class FaceSamplesHolder(object):
         self.batch_size = batch_size
         self.garbage_collect_cct = garbage_collect_cct
         self.use_mouth_image = use_mouth_image
+        self.rgb_to_bgr = rgb_to_bgr
         self.timer = timer
 
         self.ref_counter = {}
@@ -158,6 +164,16 @@ class FaceSamplesHolder(object):
 
         return samples_left
 
+    def to_torch_batch(
+        self, face_sample: List[FaceImage], cct, fps
+    ):
+        t_img, t_mel = self.predictor.to_torch_batch(
+            [face_sample], cct, fps=fps, auto_double=False,
+            use_mouth_image=self.use_mouth_image,
+            swap_rgb=self.rgb_to_bgr
+        )
+        return t_img, t_mel
+
     def load_from_cache(self, num_samples, check_size=True):
         assert (
             num_samples <= len(self.face_samples_cache)
@@ -185,8 +201,8 @@ class FaceSamplesHolder(object):
 
             cct = self.mel_cache[filename]
             fps = self.fps_cache[filename]
-            t_img, t_mel = self.predictor.to_torch_batch(
-                [face_sample], cct, fps=fps, auto_double=False
+            t_img, t_mel = self.to_torch_batch(
+                face_sample=face_sample, cct=cct, fps=fps
             )
 
             img_batch.append(t_img)
@@ -195,9 +211,7 @@ class FaceSamplesHolder(object):
         assert len(img_batch) == num_samples
         return img_batch, mel_batch
 
-    def resolve_samples(
-        self, check_size=True, use_mouth_image=False
-    ):
+    def resolve_samples(self, check_size=True):
         length = len(self.face_samples_map)
         if check_size and (length < self.batch_size):
             return False
@@ -212,9 +226,8 @@ class FaceSamplesHolder(object):
 
             cct = self.mel_cache[filename]
             fps = self.fps_cache[filename]
-            torch_data = self.predictor.to_torch_batch(
-                [face_sample], cct, fps=fps, auto_double=False,
-                use_mouth_image=use_mouth_image
+            torch_data = self.to_torch_batch(
+                face_sample=face_sample, cct=cct, fps=fps
             )
 
             if len(self.face_samples_map[key]) == 0:
@@ -249,9 +262,7 @@ class FaceSamplesHolder(object):
 
     def auto_predict_samples(self, flush=False):
         check_size = not flush
-        torch_batch = self.resolve_samples(
-            check_size, use_mouth_image=self.use_mouth_image
-        )
+        torch_batch = self.resolve_samples(check_size)
 
         if torch_batch is False:
             return False
