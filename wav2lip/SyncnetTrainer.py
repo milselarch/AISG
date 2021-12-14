@@ -145,10 +145,10 @@ class SyncnetTrainer(object):
 
         if self.use_cuda and torch.cuda.is_available():
             self.device = torch.device("cuda")
-            self.model = self.model.cuda()
         else:
             self.device = torch.device("cpu")
 
+        self.model = self.model.to(self.device)
         grad_params = [
             p for p in self.model.parameters() if p.requires_grad
         ]
@@ -281,9 +281,11 @@ class SyncnetTrainer(object):
 
         t_labels, t_images, t_mels = torch_batch
         raw_output = self.predict(t_mels, t_images, sigmoid=False)
-        sigmoid_preds = [torch.sigmoid(x) for x in raw_output]
-        preds, confs = sigmoid_preds
+        sigmoid_preds = [
+            torch.sigmoid(x).to(self.device) for x in raw_output
+        ]
 
+        preds, confs = sigmoid_preds
         raw_preds, raw_confs = raw_output
         loss = self.criterion(raw_preds, t_labels, confs)
         loss_value = loss.item()
@@ -325,9 +327,11 @@ class SyncnetTrainer(object):
         with torch.no_grad():
             t_labels, t_images, t_mels = torch_batch
             raw_output = self.predict(t_mels, t_images, sigmoid=False)
-            sigmoid_preds = [torch.sigmoid(x) for x in raw_output]
-            preds, confs = sigmoid_preds
+            sigmoid_preds = [
+                torch.sigmoid(x).to(self.device) for x in raw_output
+            ]
 
+            preds, confs = sigmoid_preds
             raw_preds, raw_confs = raw_output
             loss = self.criterion(raw_preds, t_labels, confs)
             loss_value = loss.item()

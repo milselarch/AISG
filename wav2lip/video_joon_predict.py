@@ -434,7 +434,7 @@ class VideoSyncPredictor(object):
 
     def infer_videos(
         self, filenames=None, clip=None, samples_batch_size=32,
-        face_batch_size=32, use_mouth_image=None
+        face_batch_size=32, use_mouth_image=None, rgb_to_bgr=False
     ):
         if use_mouth_image is None:
             use_mouth_image = self.use_mouth_image
@@ -446,7 +446,7 @@ class VideoSyncPredictor(object):
         date_stamp = self.make_date_stamp()
         samples_holder = FaceSamplesHolder(
             predictor=self.trainer, batch_size=samples_batch_size,
-            use_mouth_image=use_mouth_image
+            use_mouth_image=use_mouth_image, rgb_to_bgr=rgb_to_bgr
         )
 
         mel_cache = MelCache()
@@ -530,4 +530,4 @@ if __name__ == '__main__':
     # sync_predictor.profile_infer(clip=32)
     # sync_predictor.profile_infer(batch_size=32, max_samples=None)
     # sync_predictor.profile_infer(clip=32, batch_size=32)
-    sync_predictor.profile_infer_videos(clip=32)
+    sync_predictor.profile_infer_videos(clip=32, rgb_to_bgr=True)
