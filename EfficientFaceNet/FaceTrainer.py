@@ -110,6 +110,9 @@ class FaceTrainer(object):
         if eval_mode:
             self.model.eval()
 
+    def load_optimizer(self, opt_path):
+        self.optimizer.load_state_dict(torch.load(opt_path))
+
     def feed_predict(self, torch_batch_x):
         index, all_preds = 0, []
 
