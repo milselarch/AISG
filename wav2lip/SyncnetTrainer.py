@@ -498,13 +498,14 @@ class SyncnetTrainer(object):
 
     def face_predict_joon(
         self, face_samples, cct, fps, to_numpy=False,
-        is_raw_audio=False, predict_distance=False
+        is_raw_audio=False, predict_distance=False,
+        use_mouth_image=False
     ):
         return self.face_predict(
             face_samples=face_samples, melspectogram=cct,
             to_numpy=to_numpy, is_raw_audio=is_raw_audio,
             predict_distance=predict_distance, fps=fps,
-            use_joon=True
+            use_joon=True, use_mouth_image=use_mouth_image
         )
 
     @staticmethod

@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import cProfile
 import torch
+import copy
 import gc
 
 from tqdm.auto import tqdm
@@ -31,8 +32,8 @@ from BaseDataset import MelCache
 # preload_path = 'saves/checkpoints/211125-1900/E2674624_T0.68_V0.56.pt'
 # preload_path = 'saves/checkpoints/211202-0328/E8554752_T0.78_V0.68.pt'
 # preload_path = 'saves/checkpoints/211207-0123/E6668864_T0.9_V0.83.pt'
-# preload_path = 'saves/checkpoints/211202-0328/E10695968_T0.84_V0.69.pt'
-preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
+preload_path = 'saves/checkpoints/211202-0328/E10695968_T0.84_V0.69.pt'
+# preload_path = 'saves/checkpoints/211125-1900/E6143040_T0.77_V0.66.pt'
 
 class VideoSyncPredictor(object):
     def __init__(
@@ -52,9 +53,11 @@ class VideoSyncPredictor(object):
 
             fcc_list=(512, 128, 32),
             pred_ratio=1.0, dropout_p=0.5,
-            is_checkpoint=False, predict_confidence=False,
+            is_checkpoint=False, predict_confidence=True,
             transform_image=True, eval_mode=True
         )
+
+        self.trainer.model.disable_norm_toggle()
 
         self.mtcnn_cuda = mtcnn_cuda
         self.use_mouth_image = use_mouth_image
@@ -137,7 +140,8 @@ class VideoSyncPredictor(object):
             )
             predictions = self.trainer.face_predict_joon(
                 face_samples, raw_audio, fps=face_image_map.fps,
-                to_numpy=True, is_raw_audio=True
+                to_numpy=True, is_raw_audio=True,
+                use_mouth_image=self.use_mouth_image
             )
             self.record_preds(
                 predictions, face_no, num_faces,
@@ -420,11 +424,16 @@ class VideoSyncPredictor(object):
         df.to_csv(export_path, index=False)
         print(f'video sync preds exported to {export_path}')
 
-    def start_mono(self):
+    def start_mono(self, clip=None):
         date_stamp = self.make_date_stamp()
+        filenames = copy.deepcopy(self.filenames)
+        random.shuffle(filenames)
+
+        if clip is not None:
+            filenames = filenames[:clip]
 
         self.extractor.process_filepaths(
-            self.filenames, every_n_frames=1,
+            filenames, every_n_frames=1,
             skip_detect=10, ignore_detect=5, export_size=224,
             callback=self.on_faces_loaded,
             base_dir='../datasets/train/videos'
@@ -521,13 +530,14 @@ percent vid fake: 0.1875
 
 if __name__ == '__main__':
     sync_predictor = VideoSyncPredictor(
-        face_base_dir='../datasets/extract/mtcnn-sync',
+        face_base_dir='../datasets/extract/mtcnn-lip',
         use_cuda=False, mtcnn_cuda=False,
-        use_mouth_image=False
+        use_mouth_image=True
     )
 
     # sync_predictor.profile_infer(['07cc4dde853dfe59.mp4'])
     # sync_predictor.profile_infer(clip=32)
     # sync_predictor.profile_infer(batch_size=32, max_samples=None)
     # sync_predictor.profile_infer(clip=32, batch_size=32)
-    sync_predictor.profile_infer_videos(clip=32, rgb_to_bgr=True)
+    # sync_predictor.profile_infer_videos(clip=32, rgb_to_bgr=True)
+    sync_predictor.start_mono(clip=32)
