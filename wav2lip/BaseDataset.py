@@ -55,6 +55,22 @@ class MelCache(object):
 
         return name in self.cache
 
+    @property
+    def names(self):
+        names = []
+        for name in self.cache:
+            if name == 'cache_type':
+                continue
+
+            names.append(name)
+
+        return names
+
+    def __iter__(self):
+        names = self.names
+        for name in names:
+            yield name
+
     def __getitem__(self, filename):
         name = filename
         # print('GETITEM', name)

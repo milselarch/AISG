@@ -132,30 +132,71 @@ class FaceDataset(object):
         labels_df.to_csv(path, index=False)
         print(f'video face predictions exported to {path}')
 
-    def label_all_frames(self, predict, tag=None):
+    def make_image_map(self, image_names):
+        face_map = {}
+
+        for image_name in image_names:
+            face_no, frame_no = self.extract_frame(image_name)
+
+            if face_no not in face_map:
+                face_map[face_no] = []
+
+            face_map[face_no].append(image_name)
+
+        return face_map
+
+    def label_all_frames(
+        self, predict, tag=None, max_samples=None,
+        clip=None
+    ):
         if tag is None:
             tag = self.make_date_stamp()
 
-        face_cluster = FaceCluster(load_datasets=False)
-        face_path = self.face_path
-        face_map = face_cluster.make_face_map(face_path)
+        # face_cluster = FaceCluster(load_datasets=False)
+        # face_path = self.face_path
+        # face_map = face_cluster.make_face_map(face_path)
         detect_path = self.detect_path
         detections = pd.read_csv(detect_path)
 
-        for index in tqdm(detections.index):
-            row = detections.loc[index]
-            filename = row['filename']
-            frame_no = row['frame']
-            face_no = row['face']
+        filenames = detections['filename']
+        filenames = np.unique(filenames.to_numpy())
+        filename_log, prediction_log = [], []
+        face_log, frame_log = [], []
 
-            name = filename[:filename.index('.')]
-            img_file = f'{name}/{face_no}-{frame_no}.jpg'
-            img_path = f'{self.face_dir}/{img_file}'
-            prediction = predict(img_path)
-            detections.loc[index, 'prediction'] = prediction
+        if clip is not None:
+            filenames = filenames[:clip]
 
-        path = f'../stats/face-predictions-{tag}.csv'
-        detections.to_csv(path, index=False)
+        for filename in tqdm(filenames):
+            name = filename[:filename.rindex('.')]
+            image_dir = f'{self.face_dir}/{name}'
+            image_names = os.listdir(image_dir)
+            face_image_map = self.make_image_map(image_names)
+
+            for face_no in face_image_map:
+                face_image_names = face_image_map[face_no]
+
+                if max_samples is not None:
+                    random.shuffle(face_image_names)
+                    face_image_names = face_image_names[:max_samples]
+
+                for image_name in face_image_names:
+                    frame_no = self.get_frame_no(image_name)
+                    img_file = f'{name}/{face_no}-{frame_no}.jpg'
+                    img_path = f'{self.face_dir}/{img_file}'
+
+                    prediction = predict(img_path)
+                    prediction_log.append(prediction)
+                    filename_log.append(filename)
+                    frame_log.append(frame_no)
+                    face_log.append(face_no)
+
+        df = pd.DataFrame(data={
+            'filename': filename_log, 'face': face_log,
+            'frame': frame_log, 'pred': prediction_log
+        })
+
+        path = f'stats/face-predictions-{tag}.csv'
+        df.to_csv(path, index=False)
         print(f'face predictions exported to {path}')
 
     def load_talker_face_map(self):
