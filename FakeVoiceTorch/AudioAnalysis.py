@@ -12,7 +12,7 @@ from scipy import stats
 class AudioAnalysis(object):
     def __init__(
         self, labels_path='../datasets/extra-labels.csv',
-        audio_dir='../datasets-local/audios-flac', audio_ext='flac',
+        audio_dir='../datasets/extract/audios-flac', audio_ext='flac',
         durations_path='csvs/aisg-durations-210929-0931.csv',
         clip_start=160, clip_length=80
     ):
@@ -28,7 +28,7 @@ class AudioAnalysis(object):
 
         self.duration_map = None
 
-    def resolve(self, filename, cache_mel=True):
+    def load_mel(self, filename):
         try:
             name = filename[:filename.index('.')]
         except ValueError as e:
@@ -38,13 +38,19 @@ class AudioAnalysis(object):
         file_path = f'{self.audio_dir}/{name}.{self.audio_ext}'
 
         if not os.path.exists(file_path):
-            invalid.append(file_path)
             raise FileNotFoundError
 
-        if name in self.cache:
-            return self.cache[name]
-
         mel, _, duration = utils.process(file_path, '', 0)
+        return mel, _, duration
+
+    def resolve(self, filename, cache_mel=True):
+        try:
+            name = filename[:filename.index('.')]
+        except ValueError as e:
+            print('bad filename', filename)
+            raise e
+
+        mel, _, duration = self.load_mel(filename)
         clip_end = self.clip_start+self.clip_length
         mel = mel[self.clip_start: clip_end]
 
@@ -52,6 +58,11 @@ class AudioAnalysis(object):
             self.cache[name] = mel
 
         return mel
+
+    def get_filenames(self):
+        df = pd.read_csv(self.durations_path)
+        filenames = df['filename'].to_numpy().tolist()
+        return filenames
 
     def build_duration_map(self):
         df = pd.read_csv(self.durations_path)

@@ -105,8 +105,15 @@ class FaceTrainer(object):
     def transform(self, image):
         return self.dataset.transform(image)
 
-    def load_model(self, model_path, eval_mode=True):
-        self.model.load_state_dict(torch.load(model_path))
+    def load_model(
+        self, model_path, eval_mode=True, map_location=None
+    ):
+        if map_location is None:
+            map_location = self.device
+
+        state = torch.load(model_path, map_location=map_location)
+        self.model.load_state_dict(state)
+
         if eval_mode:
             self.model.eval()
 
@@ -217,7 +224,7 @@ class FaceTrainer(object):
 
     def predict_file(self, filepath:str):
         assert type(filepath) is str
-        predictions = self.batch_predict([filepath])
+        predictions = self.batch_predict([filepath], no_grad=True)
         prediction = predictions[0][0]
         return prediction
 

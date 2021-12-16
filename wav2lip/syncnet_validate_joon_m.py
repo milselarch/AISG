@@ -37,10 +37,12 @@ if __name__ == '__main__':
         fcc_list=(512, 128, 32),
         pred_ratio=1.0,  dropout_p=0.5,
         is_checkpoint=False, predict_confidence=True,
-        transform_image=True, eval_mode=False
+        transform_image=True, eval_mode=True
     )
 
-    trainer.load_model(preload_path, eval_mode=False)
+    trainer.load_model(preload_path, eval_mode=True)
+    trainer.model.disable_norm_toggle()
+    mono_filename = True
     is_training = True
 
     trainer.start_dataset_workers(
@@ -49,6 +51,9 @@ if __name__ == '__main__':
         image_cache_workers=1
     )
     trainer.validate(
-        episodes=500, fake_p=0.5, mono_filename=False,
+        episodes=500, fake_p=0.5, mono_filename=mono_filename,
         use_train_data=is_training
     )
+
+    print('MONO FILENAME', mono_filename)
+    print('END')

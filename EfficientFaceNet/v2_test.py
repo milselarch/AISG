@@ -12,6 +12,8 @@ large: 705.61083984375
 extra-large: 1053.1572265625
 """
 
+torch.set_grad_enabled(False)
+torch.cuda._lazy_init()
 model = effnetv2_m(num_classes=1).to('cuda')
 
 # Preprocess image
@@ -55,3 +57,4 @@ for idx in torch.topk(outputs, k=5).indices.squeeze(0).tolist():
 """
 
 print('OUTPUT', outputs)
+input('done ')

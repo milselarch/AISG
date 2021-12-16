@@ -1,7 +1,7 @@
 from FaceTrainer import FaceTrainer
 
 # trainer = MesoTrainer()
-trainer = FaceTrainer(model_type='m', use_cuda=False)
+trainer = FaceTrainer(model_type='m', use_cuda=True)
 
 # trainer.train(episodes=4*1000*1000)
 # preload_path = 'saves/checkpoints/211211-1551/E85952_T0.59_V0.58.pt'
